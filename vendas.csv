@@ -1,4 +1,7 @@
-Data,Consultor,Cliente,Serviço,Valor,Status Pagamento,Status Serviço
-2025-11-18,Gu,Jose,Limpeza de Nome,300.0,Pendente,Não
-2025-11-18,Kobe,Daniel,Aumento de Score,900.0,Pago Total,Não
-2025-11-18,Gu,Rita,Consultoria,450.0,Pago Total,Sim
+Data,Consultor,Cliente,Serviço,Valor,Status Pagamento,Status Serviço,Docs
+2025-11-18,Gu,Jose,Limpeza de Nome,300.0,Pendente,Não,
+2025-11-18,Kobe,Daniel,Aumento de Score,900.0,Pago Total,Não,
+2025-11-18,Gu,Rita,Consultoria,450.0,Pago Total,Sim,
+2025-11-18,Gu,Tilia,Consultoria,150.0,Pago Total,Em Andamento,
+2025-11-18,Kobe,Hui,Limpeza de Nome,4500.0,Pago Total,,
+2025-11-18,Gu,Ju,Limpeza de Nome,590.0,Pago Total,,2 arquivos em /Ju

@@ -410,7 +410,8 @@ elif escolha_menu == "👥 VENDAS":
                         if not df_clientes_raw.empty:
                             if cli in df_clientes_raw['Nome'].values: exists = True
                         if not exists:
-                             run_query("INSERT INTO clientes (Nome, CPF, Email, Telefone, Data_Cadastro, Obs) VALUES (?,?,?,?,?,?,?)", (cli, cpf, email, tel, str(date.today()), "Auto Venda"))
+                            # --- CORREÇÃO AQUI: 6 Colunas e 6 Placeholders (?) ---
+                            run_query("INSERT INTO clientes (Nome, CPF, Email, Telefone, Data_Cadastro, Obs) VALUES (?,?,?,?,?,?)", (cli, cpf, email, tel, str(date.today()), "Auto Venda"))
                         st.toast("Salvo!"); st.rerun()
     with c2:
         st.markdown("#### Histórico")

@@ -171,7 +171,7 @@ def chat_ia(df_v, df_d, user_msg, key):
 # 4. BARRA LATERAL
 # ==========================================
 with st.sidebar:
-    st.title("CMG Pro")
+    st.title("💎 CMG Pro")
     st.markdown("Manager v20.0")
     
     st.markdown("### Menu")

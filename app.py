@@ -14,117 +14,45 @@ from openai import OpenAI
 st.set_page_config(page_title="CMG System Pro", layout="wide", page_icon="💎")
 
 # ==========================================
-# 2. SISTEMA DE TEMAS & CSS (CORRIGIDO)
+# 2. SISTEMA DE TEMAS & CSS
 # ==========================================
 if "theme" not in st.session_state:
-    st.session_state.theme = "Escuro" # Padrão Escuro (igual tua imagem)
+    st.session_state.theme = "Escuro"
 
-# --- CSS COMUM ---
+# --- CSS BASE ---
 CSS_BASE = """
 <style>
-    /* Remover padding excessivo do topo para a busca ficar lá em cima */
-    .block-container { padding-top: 1.5rem; padding-bottom: 1rem; }
-    
-    /* Estilo da Barra de Busca Centralizada */
-    div[data-testid="stTextInput"] {
-        margin-bottom: 10px;
-    }
-    
-    /* Centralizar o texto dentro dos inputs */
-    input { padding-left: 10px !important; }
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    div[data-testid="stTextInput"] input { font-size: 16px; padding: 10px; }
 </style>
 """
 
-# --- CSS MODO CLARO (FIX: TEXTO ESCURO EM FUNDO CLARO) ---
+# --- CSS CLARO ---
 CSS_LIGHT = CSS_BASE + """
 <style>
-    /* Fundo Geral */
     .stApp { background-color: #F3F4F6; color: #111827; }
-    
-    /* Sidebar */
     section[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }
-    
-    /* Textos Gerais (Forçar Preto) */
     h1, h2, h3, h4, h5, h6, p, span, label { color: #111827 !important; }
-    
-    /* INPUTS (AQUI ESTAVA O PROBLEMA) */
-    /* Garante que o fundo do input seja branco e o TEXTO SEJA PRETO */
-    div[data-baseweb="input"] {
-        background-color: #FFFFFF !important;
-        border: 1px solid #9CA3AF !important; /* Borda mais visível */
-        border-radius: 8px !important;
-    }
-    input[type="text"], input[type="number"], input[type="password"] {
-        color: #000000 !important; /* Texto Preto Absoluto */
-        background-color: transparent !important;
-    }
-    
-    /* Cartões de Métricas */
-    div[data-testid="stMetric"] { 
-        background-color: #FFFFFF; 
-        padding: 20px; 
-        border-radius: 12px; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
-        border: 1px solid #E5E7EB; 
-    }
+    div[data-baseweb="input"], input { background-color: #FFFFFF !important; border-color: #9CA3AF !important; color: #000000 !important; }
+    div[data-testid="stMetric"] { background-color: #FFFFFF; padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #E5E7EB; }
     div[data-testid="stMetricLabel"] label { color: #6B7280 !important; }
     div[data-testid="stMetricValue"] { color: #111827 !important; }
-    
-    /* Tabelas */
-    div[data-testid="stDataFrame"] { 
-        background-color: #FFFFFF; 
-        border: 1px solid #E5E7EB; 
-        border-radius: 12px;
-        color: #000000 !important;
-    }
-    
-    /* Botões do Menu Lateral (Radio) */
+    div[data-testid="stDataFrame"] { background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; color: #000000 !important; }
     .stRadio label { color: #374151 !important; font-weight: 600; }
 </style>
 """
 
-# --- CSS MODO ESCURO (IGUAL TUA IMAGEM) ---
+# --- CSS ESCURO ---
 CSS_DARK = CSS_BASE + """
 <style>
-    /* Fundo Geral */
     .stApp { background-color: #0E1117; color: #FAFAFA; }
-    
-    /* Sidebar */
     section[data-testid="stSidebar"] { background-color: #171923; border-right: 1px solid #2D3748; }
-    
-    /* Textos Gerais */
     h1, h2, h3, h4, h5, h6, p, span, label { color: #FAFAFA !important; }
-    
-    /* INPUTS (Busca Visível) */
-    div[data-baseweb="input"] {
-        background-color: #2D3748 !important;
-        border: 1px solid #4A5568 !important;
-        border-radius: 8px !important;
-    }
-    input[type="text"], input[type="number"], input[type="password"] {
-        color: #FFFFFF !important; /* Texto Branco */
-        background-color: transparent !important;
-    }
-    
-    /* Cartões */
-    div[data-testid="stMetric"] { 
-        background-color: #262730; 
-        padding: 20px; 
-        border-radius: 12px; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
-        border: 1px solid #4A5568; 
-    }
+    div[data-baseweb="input"], input { background-color: #2D3748 !important; border-color: #4A5568 !important; color: #FFFFFF !important; }
+    div[data-testid="stMetric"] { background-color: #262730; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #4A5568; }
     div[data-testid="stMetricLabel"] label { color: #A0AEC0 !important; }
     div[data-testid="stMetricValue"] { color: #F7FAFC !important; }
-    
-    /* Tabelas */
-    div[data-testid="stDataFrame"] { 
-        background-color: #1A202C; 
-        border: 1px solid #2D3748; 
-        border-radius: 12px;
-    }
-    
-    /* Botões Menu */
+    div[data-testid="stDataFrame"] { background-color: #1A202C; border: 1px solid #2D3748; border-radius: 12px; }
     .stRadio label { color: #E2E8F0 !important; font-weight: 600; }
 </style>
 """
@@ -143,6 +71,18 @@ def init_db():
         c.execute('CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT, CPF TEXT, Email TEXT, Telefone TEXT, Data_Cadastro TEXT, Obs TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS consultores (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS bancos (id INTEGER PRIMARY KEY AUTOINCREMENT, Banco TEXT, Agencia TEXT, Conta TEXT)')
+        
+        # --- NOVA TABELA DE SERVIÇOS ---
+        c.execute('CREATE TABLE IF NOT EXISTS servicos (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT)')
+        
+        # Preenche serviços padrão se estiver vazia (primeira vez)
+        c.execute("SELECT count(*) FROM servicos")
+        if c.fetchone()[0] == 0:
+            padroes = [("Limpeza Nome",), ("Score",), ("Consultoria",), ("Jurídico",)]
+            c.executemany("INSERT INTO servicos (Nome) VALUES (?)", padroes)
+        
+        c.execute('CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT)')
+        
         c.execute('''CREATE TABLE IF NOT EXISTS vendas (
             id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Consultor TEXT, Cliente TEXT, CPF TEXT, 
             Servico TEXT, Valor REAL, Status_Pagamento TEXT, Conta_Recebimento TEXT, Obs TEXT, Docs TEXT, Email TEXT, Telefone TEXT
@@ -150,11 +90,18 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS despesas (
             id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Categoria TEXT, Descricao TEXT, Conta_Origem TEXT, Valor REAL
         )''')
+        
+        # Migrações e Metas Padrão
         for col in ["Email", "Telefone", "Obs", "Conta_Recebimento"]:
             try: c.execute(f"ALTER TABLE vendas ADD COLUMN {col} TEXT"); 
             except: pass
         try: c.execute("ALTER TABLE despesas ADD COLUMN Conta_Origem TEXT"); 
         except: pass
+        try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('meta_mensal', '50000')")
+        except: pass
+        try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('meta_anual', '600000')")
+        except: pass
+        
         conn.commit()
 
 init_db()
@@ -172,6 +119,20 @@ def load_data(table_name):
         df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
     return df
 
+def get_config(chave):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("SELECT valor FROM config WHERE chave=?", (chave,))
+        res = c.fetchone()
+        return float(res[0]) if res else 0.0
+
+def set_config(chave, valor):
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES (?, ?)", (chave, str(valor)))
+        conn.commit()
+    st.cache_data.clear()
+
 def update_full_table(df, table_name):
     with sqlite3.connect(DB_NAME) as conn:
         df.to_sql(table_name, conn, if_exists='replace', index=False)
@@ -187,10 +148,11 @@ def salvar_arquivos(arquivos, nome_cliente):
             f.write(arq.getbuffer())
     return len(arquivos)
 
-def converter_para_excel(df):
+def converter_para_excel(dfs_dict):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Dados')
+        for name, df in dfs_dict.items():
+            df.to_excel(writer, index=False, sheet_name=name)
     return output.getvalue()
 
 def chat_ia(df_v, df_d, user_msg, key):
@@ -206,13 +168,12 @@ def chat_ia(df_v, df_d, user_msg, key):
     except Exception as e: return f"Erro IA: {e}"
 
 # ==========================================
-# 4. BARRA LATERAL (MENU E TEMA)
+# 4. BARRA LATERAL
 # ==========================================
 with st.sidebar:
     st.title("💎 CMG Pro")
-    st.markdown("Manager v18.0")
+    st.markdown("Manager v20.0")
     
-    # 1. Menu
     st.markdown("### Menu")
     menu_options = [
         "📊 DASHBOARD", "🧮 PRECIFICAÇÃO", "📇 CRM", 
@@ -220,44 +181,17 @@ with st.sidebar:
         "📂 ARQUIVOS", "🤖 I.A."
     ]
     escolha_menu = st.radio("Ir para:", menu_options, label_visibility="collapsed")
-    
     st.divider()
 
-    # 2. Tema
-    st.markdown("### 🌗 Tema Visual")
-    tema_selecionado = st.radio("Tema:", ["Claro", "Escuro"], index=0 if st.session_state.theme == "Claro" else 1, label_visibility="collapsed")
-    
-    if tema_selecionado != st.session_state.theme:
-        st.session_state.theme = tema_selecionado
-        st.rerun()
-
-    # Lógica de Cores baseada no Tema
-    if st.session_state.theme == "Claro":
-        st.markdown(CSS_LIGHT, unsafe_allow_html=True)
-        cor_grafico = ["#6366F1", "#3B82F6", "#10B981", "#F59E0B"]
-        plotly_template = "plotly_white"
-        txt_chart = "#111827"
-    else:
-        st.markdown(CSS_DARK, unsafe_allow_html=True)
-        cor_grafico = ["#E53E3E", "#F6E05E", "#4FD1C5", "#9F7AEA"]
-        plotly_template = "plotly_dark"
-        txt_chart = "white"
-
-    st.divider()
-
-    # 3. Filtros
     st.markdown("### 📅 Filtros")
     tipo_filtro = st.radio("Período:", ["Mês Atual", "Personalizado", "Todo Histórico"], label_visibility="collapsed")
-    
-    data_inicio = None
-    data_fim = None
+    data_inicio, data_fim = None, None
     
     if tipo_filtro == "Mês Atual":
         hj = datetime.now()
         import calendar
         ultimo_dia = calendar.monthrange(hj.year, hj.month)[1]
-        data_inicio = date(hj.year, hj.month, 1)
-        data_fim = date(hj.year, hj.month, ultimo_dia)
+        data_inicio, data_fim = date(hj.year, hj.month, 1), date(hj.year, hj.month, ultimo_dia)
         st.caption(f"🗓️ {data_inicio.strftime('%d/%m')} - {data_fim.strftime('%d/%m')}")
     elif tipo_filtro == "Personalizado":
         c1, c2 = st.columns(2)
@@ -265,37 +199,28 @@ with st.sidebar:
         data_fim = c2.date_input("Até", value=datetime.now().date())
 
     st.divider()
-    
-    # 4. API Key
-    st.markdown("### 🔑 API Key")
     openai_key = ""
     try:
         if "OPENAI_API_KEY" in st.secrets: openai_key = st.secrets["OPENAI_API_KEY"]
     except: pass
-    if not openai_key: openai_key = st.text_input("OpenAI Key", type="password", label_visibility="collapsed")
+    if not openai_key: openai_key = st.text_input("🔑 API Key", type="password")
 
 # ==========================================
-# 5. BUSCA CENTRALIZADA (HEADER)
-# ==========================================
-# Cria um container visualmente destacado para a busca
-c_spacer1, c_search, c_spacer2 = st.columns([1, 6, 1])
-with c_search:
-    # A classe CSS vai garantir que isso fique visível em ambos os temas
-    termo_busca = st.text_input("🔍 Buscar no Sistema", placeholder="Digite Nome, CPF ou Cliente...", label_visibility="collapsed")
-
-# ==========================================
-# 6. LÓGICA DE DADOS
+# 5. LÓGICA DE DADOS
 # ==========================================
 df_vendas_raw = load_data("vendas")
 df_despesas_raw = load_data("despesas")
 df_clientes_raw = load_data("clientes")
 df_consultores = load_data("consultores")
 df_bancos = load_data("bancos")
+df_servicos = load_data("servicos") # CARREGA SERVIÇOS DO BANCO
+
+meta_mensal = get_config('meta_mensal')
+meta_anual = get_config('meta_anual')
 
 df_vendas_raw['Data'] = pd.to_datetime(df_vendas_raw['Data'], errors='coerce').dt.date
 df_despesas_raw['Data'] = pd.to_datetime(df_despesas_raw['Data'], errors='coerce').dt.date
 
-# Filtro Data
 if tipo_filtro != "Todo Histórico" and data_inicio and data_fim:
     df_vendas = df_vendas_raw[(df_vendas_raw['Data'] >= data_inicio) & (df_vendas_raw['Data'] <= data_fim)].copy()
     df_despesas = df_despesas_raw[(df_despesas_raw['Data'] >= data_inicio) & (df_despesas_raw['Data'] <= data_fim)].copy()
@@ -303,32 +228,43 @@ else:
     df_vendas = df_vendas_raw.copy()
     df_despesas = df_despesas_raw.copy()
 
-# Filtro Busca
-if termo_busca:
-    t = termo_busca.lower()
-    mask_v = df_vendas.astype(str).apply(lambda x: x.str.lower().str.contains(t)).any(axis=1)
-    df_vendas = df_vendas[mask_v]
-    mask_c = df_clientes_raw.astype(str).apply(lambda x: x.str.lower().str.contains(t)).any(axis=1)
-    df_clientes = df_clientes_raw[mask_c]
-else:
-    df_clientes = df_clientes_raw.copy()
-
+# Listas Dinâmicas
 lista_consultores = df_consultores["Nome"].tolist() if not df_consultores.empty else ["Geral"]
 lista_bancos = df_bancos["Banco"].tolist() if not df_bancos.empty else ["Caixa Principal"]
+lista_servicos = df_servicos["Nome"].tolist() if not df_servicos.empty else ["Geral"]
+
+# TEMA CSS
+if st.session_state.theme == "Claro":
+    st.markdown(CSS_LIGHT, unsafe_allow_html=True)
+    cor_grafico = ["#6366F1", "#3B82F6", "#10B981", "#F59E0B"]
+    plotly_template = "plotly_white"
+    txt_chart = "#111827"
+else:
+    st.markdown(CSS_DARK, unsafe_allow_html=True)
+    cor_grafico = ["#E53E3E", "#F6E05E", "#4FD1C5", "#9F7AEA"]
+    plotly_template = "plotly_dark"
+    txt_chart = "white"
 
 # ==========================================
-# 7. ROTEAMENTO
+# 6. ROTEAMENTO
 # ==========================================
 
 # --- DASHBOARD ---
 if escolha_menu == "📊 DASHBOARD":
-    fat = df_vendas["Valor"].sum() if not df_vendas.empty else 0
+    st.markdown("## 📊 Visão Geral")
+    termo_busca = st.text_input("🔍 Buscar rápido...", placeholder="Digite para filtrar os dados abaixo...")
+    
+    df_v = df_vendas.copy()
+    if termo_busca:
+        mask = df_v.astype(str).apply(lambda x: x.str.lower().str.contains(termo_busca.lower())).any(axis=1)
+        df_v = df_v[mask]
+
+    fat = df_v["Valor"].sum() if not df_v.empty else 0
     desp = df_despesas["Valor"].sum() if not df_despesas.empty else 0
     lucro = fat - desp
-    ticket = fat / len(df_vendas) if len(df_vendas) > 0 else 0
+    ticket = fat / len(df_v) if len(df_v) > 0 else 0
     
-    st.markdown(f"## 📊 Visão Geral ({tipo_filtro})")
-    
+    st.caption(f"Período: {tipo_filtro}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Faturamento", f"R$ {fat:,.2f}")
     c2.metric("Lucro Líquido", f"R$ {lucro:,.2f}", delta=f"{(lucro/fat)*100:.1f}%" if fat>0 else "0%")
@@ -340,24 +276,22 @@ if escolha_menu == "📊 DASHBOARD":
     g1, g2 = st.columns([1, 2])
     with g1:
         st.markdown("**Mix de Serviços**")
-        if not df_vendas.empty:
-            fig_pie = px.pie(df_vendas, names="Servico", values="Valor", hole=0.7, color_discrete_sequence=cor_grafico, template=plotly_template)
+        if not df_v.empty:
+            fig_pie = px.pie(df_v, names="Servico", values="Valor", hole=0.7, color_discrete_sequence=cor_grafico, template=plotly_template)
             fig_pie.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20), height=280, paper_bgcolor="rgba(0,0,0,0)")
-            fig_pie.add_annotation(text=f"Total<br>R${fat:,.0f}", showarrow=False, font_size=14, font_color=txt_chart)
+            fig_pie.add_annotation(text=f"R${fat:,.0f}", showarrow=False, font_size=14, font_color=txt_chart)
             st.plotly_chart(fig_pie, use_container_width=True)
         else: st.info("Sem dados")
-
     with g2:
         st.markdown("**Evolução Financeira**")
-        if not df_vendas.empty:
-            daily_sales = df_vendas.groupby("Data")["Valor"].sum().reset_index()
-            fig_area = px.area(daily_sales, x="Data", y="Valor", color_discrete_sequence=[cor_grafico[1]], template=plotly_template)
+        if not df_v.empty:
+            daily = df_v.groupby("Data")["Valor"].sum().reset_index()
+            fig_area = px.area(daily, x="Data", y="Valor", color_discrete_sequence=[cor_grafico[1]], template=plotly_template)
             fig_area.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(t=10, b=10, l=10, r=10), height=280)
             st.plotly_chart(fig_area, use_container_width=True)
         else: st.info("Sem dados")
     
     st.markdown("<br>", unsafe_allow_html=True)
-    
     g3, g4 = st.columns([2, 1])
     with g3:
         st.markdown("**Fluxo de Caixa**")
@@ -366,10 +300,10 @@ if escolha_menu == "📊 DASHBOARD":
         fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=250, showlegend=False)
         st.plotly_chart(fig_bar, use_container_width=True)
     with g4:
-        st.markdown("**Meta**")
+        st.markdown("**Meta Mensal**")
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number", value = fat, domain = {'x': [0, 1], 'y': [0, 1]},
-            gauge = {'axis': {'range': [None, 50000]}, 'bar': {'color': cor_grafico[2]}, 'bgcolor': "#2D3748" if st.session_state.theme == "Escuro" else "#E5E7EB"}
+            gauge = {'axis': {'range': [None, meta_mensal]}, 'bar': {'color': cor_grafico[2]}, 'bgcolor': "#2D3748" if st.session_state.theme == "Escuro" else "#E5E7EB"}
         ))
         fig_gauge.update_layout(height=250, margin=dict(t=30, b=10), paper_bgcolor="rgba(0,0,0,0)", font={'color': txt_chart})
         st.plotly_chart(fig_gauge, use_container_width=True)
@@ -387,7 +321,7 @@ elif escolha_menu == "🧮 PRECIFICAÇÃO":
     with c2:
         with st.container(border=True):
             soma = imposto + comissao + margem
-            if soma >= 100: st.error("Erro: Margens > 100%")
+            if soma >= 100: st.error("Margens > 100%")
             else:
                 fator = (100 - soma) / 100
                 preco_venda = custo / fator
@@ -397,11 +331,18 @@ elif escolha_menu == "🧮 PRECIFICAÇÃO":
 
 # --- CRM ---
 elif escolha_menu == "📇 CRM":
-    st.markdown("## 📇 CRM")
+    st.markdown("## 📇 Clientes")
+    busca_crm = st.text_input("🔍 Buscar Cliente...", placeholder="Nome ou CPF")
+    
+    df_c = df_clientes_raw.copy()
+    if busca_crm:
+        mask = df_c.astype(str).apply(lambda x: x.str.lower().str.contains(busca_crm.lower())).any(axis=1)
+        df_c = df_c[mask]
+
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
-            st.markdown("#### Novo")
+            st.markdown("#### Cadastrar")
             with st.form("crm"):
                 n = st.text_input("Nome*")
                 cpf = st.text_input("CPF")
@@ -414,9 +355,9 @@ elif escolha_menu == "📇 CRM":
                         st.success("Salvo!"); st.rerun()
                     else: st.error("Erro")
     with c2:
-        st.markdown(f"#### Clientes ({len(df_clientes)})")
-        if "Excluir" not in df_clientes.columns: df_clientes.insert(0, "Excluir", False)
-        ed = st.data_editor(df_clientes, hide_index=True, use_container_width=True, column_config={"id": st.column_config.NumberColumn(disabled=True)})
+        st.markdown(f"#### Base ({len(df_c)})")
+        if "Excluir" not in df_c.columns: df_c.insert(0, "Excluir", False)
+        ed = st.data_editor(df_c, hide_index=True, use_container_width=True, column_config={"id": st.column_config.NumberColumn(disabled=True)})
         if st.button("💾 Atualizar CRM"):
             df_final = ed[ed["Excluir"]==False].drop(columns=["Excluir"])
             update_full_table(df_final, "clientes"); st.rerun()
@@ -424,35 +365,57 @@ elif escolha_menu == "📇 CRM":
 # --- VENDAS ---
 elif escolha_menu == "👥 VENDAS":
     st.markdown("## 👥 Vendas")
+    busca_vendas = st.text_input("🔍 Filtrar Vendas...", placeholder="Cliente, Consultor...")
+    
+    df_v = df_vendas.copy()
+    if busca_vendas:
+        mask = df_v.astype(str).apply(lambda x: x.str.lower().str.contains(busca_vendas.lower())).any(axis=1)
+        df_v = df_v[mask]
+        
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
             st.markdown("#### Lançar")
             with st.form("venda"):
                 cons = st.selectbox("Consultor", lista_consultores)
-                cli = st.text_input("Cliente*")
-                cpf = st.text_input("CPF")
-                serv = st.selectbox("Serviço", ["Limpeza Nome", "Score", "Consultoria", "Jurídico"])
+                
+                # Campos do Cliente
+                c_cli, c_cpf = st.columns(2)
+                cli = c_cli.text_input("Cliente*")
+                cpf = c_cpf.text_input("CPF")
+                
+                # NOVOS CAMPOS: EMAIL E TELEFONE
+                c_email, c_tel = st.columns(2)
+                email = c_email.text_input("Email")
+                tel = c_tel.text_input("Telefone")
+                
+                # Serviço agora puxa da lista dinâmica
+                serv = st.selectbox("Serviço", lista_servicos)
+                
                 val = st.number_input("Valor", min_value=0.0)
-                stt = st.selectbox("Status", ["Pago Total", "Parcial", "Pendente"])
-                cnt = st.selectbox("Recebido em", lista_bancos)
+                
+                c_stts, c_conta = st.columns(2)
+                stt = c_stts.selectbox("Status", ["Pago Total", "Parcial", "Pendente"])
+                cnt = c_conta.selectbox("Recebido em", lista_bancos)
+                
                 obs = st.text_area("Obs")
                 docs = st.file_uploader("Docs", accept_multiple_files=True)
+                
                 if st.form_submit_button("Salvar"):
                     if cli:
                         qtd = salvar_arquivos(docs, cli)
-                        run_query("INSERT INTO vendas (Data, Consultor, Cliente, CPF, Servico, Valor, Status_Pagamento, Conta_Recebimento, Obs, Docs) VALUES (?,?,?,?,?,?,?,?,?,?)", 
-                                  (str(date.today()), cons, cli, cpf, serv, val, stt, cnt, obs, f"{qtd} arqs"))
+                        run_query("INSERT INTO vendas (Data, Consultor, Cliente, CPF, Email, Telefone, Servico, Valor, Status_Pagamento, Conta_Recebimento, Obs, Docs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", 
+                                  (str(date.today()), cons, cli, cpf, email, tel, serv, val, stt, cnt, obs, f"{qtd} arqs"))
                         exists = False
                         if not df_clientes_raw.empty:
                             if cli in df_clientes_raw['Nome'].values: exists = True
                         if not exists:
-                             run_query("INSERT INTO clientes (Nome, CPF, Data_Cadastro, Obs) VALUES (?,?,?,?)", (cli, cpf, str(date.today()), "Auto Venda"))
+                             run_query("INSERT INTO clientes (Nome, CPF, Email, Telefone, Data_Cadastro, Obs) VALUES (?,?,?,?,?,?,?)", (cli, cpf, email, tel, str(date.today()), "Auto Venda"))
                         st.toast("Salvo!"); st.rerun()
     with c2:
         st.markdown("#### Histórico")
-        if "Excluir" not in df_vendas.columns: df_vendas.insert(0, "Excluir", False)
-        ed_v = st.data_editor(df_vendas, hide_index=True, use_container_width=True, column_config={"id": st.column_config.NumberColumn(disabled=True)})
+        if "Excluir" not in df_v.columns: df_v.insert(0, "Excluir", False)
+        ed_v = st.data_editor(df_v, hide_index=True, use_container_width=True, column_config={"id": st.column_config.NumberColumn(disabled=True)})
         if st.button("💾 Atualizar Vendas"):
             df_f = ed_v[ed_v["Excluir"]==False].drop(columns=["Excluir"])
             df_f['Data'] = df_f['Data'].astype(str)
@@ -464,7 +427,7 @@ elif escolha_menu == "💰 FINANCEIRO":
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
-            st.markdown("#### Despesa")
+            st.markdown("#### Lançar Saída")
             desc = st.text_input("Descrição")
             cat = st.selectbox("Categoria", ["Fixo", "Comissões", "Marketing", "Impostos"])
             con = st.selectbox("Saiu de", lista_bancos)
@@ -474,7 +437,7 @@ elif escolha_menu == "💰 FINANCEIRO":
                           (str(date.today()), cat, desc, con, val))
                 st.toast("Salvo!"); st.rerun()
     with c2:
-        st.markdown("#### Saídas")
+        st.markdown("#### Despesas")
         if "Excluir" not in df_despesas.columns: df_despesas.insert(0, "Excluir", False)
         ed_d = st.data_editor(df_despesas, hide_index=True, use_container_width=True)
         if st.button("💾 Atualizar Finanças"):
@@ -482,22 +445,73 @@ elif escolha_menu == "💰 FINANCEIRO":
              df_f['Data'] = df_f['Data'].astype(str)
              update_full_table(df_f, "despesas"); st.rerun()
 
-# --- CONFIG ---
+# --- CONFIG (METAS, CADASTROS, BACKUP) ---
 elif escolha_menu == "⚙️ CONFIG":
     st.markdown("## ⚙️ Configurações")
-    c1, c2 = st.columns(2)
-    with c1:
-        with st.form("add_c"):
-            nm = st.text_input("Novo Consultor")
-            if st.form_submit_button("Add") and nm: 
-                run_query("INSERT INTO consultores (Nome) VALUES (?)", (nm,)); st.rerun()
-        if not df_consultores.empty: st.dataframe(df_consultores, hide_index=True, use_container_width=True)
-    with c2:
-        with st.form("add_b"):
-            nb = st.text_input("Novo Banco")
-            if st.form_submit_button("Add") and nb: 
-                run_query("INSERT INTO bancos (Banco) VALUES (?)", (nb,)); st.rerun()
-        if not df_bancos.empty: st.dataframe(df_bancos, hide_index=True, use_container_width=True)
+    
+    tab_geral, tab_backup = st.tabs(["Cadastros & Aparência", "Backup & Relatórios"])
+    
+    with tab_geral:
+        col_cadastros, col_sistema = st.columns(2)
+        
+        with col_cadastros:
+            st.markdown("#### 📋 Cadastros Auxiliares")
+            
+            # Serviços
+            with st.expander("Serviços (Venda)", expanded=True):
+                with st.form("add_s"):
+                    ns = st.text_input("Novo Serviço")
+                    if st.form_submit_button("Add") and ns: 
+                        run_query("INSERT INTO servicos (Nome) VALUES (?)", (ns,)); st.rerun()
+                if not df_servicos.empty: 
+                    if "Excluir" not in df_servicos.columns: df_servicos.insert(0, "Excluir", False)
+                    ed_s = st.data_editor(df_servicos, hide_index=True, key="editor_servicos")
+                    if st.button("Salvar Serviços"):
+                        update_full_table(ed_s[ed_s["Excluir"]==False].drop(columns=["Excluir"]), "servicos"); st.rerun()
+
+            # Consultores
+            with st.expander("Consultores"):
+                with st.form("add_c"):
+                    nm = st.text_input("Novo Consultor")
+                    if st.form_submit_button("Add") and nm: 
+                        run_query("INSERT INTO consultores (Nome) VALUES (?)", (nm,)); st.rerun()
+                if not df_consultores.empty: st.dataframe(df_consultores, hide_index=True)
+            
+            # Bancos
+            with st.expander("Contas Bancárias"):
+                with st.form("add_b"):
+                    nb = st.text_input("Novo Banco")
+                    if st.form_submit_button("Add") and nb: 
+                        run_query("INSERT INTO bancos (Banco) VALUES (?)", (nb,)); st.rerun()
+                if not df_bancos.empty: st.dataframe(df_bancos, hide_index=True)
+
+        with col_sistema:
+            st.markdown("#### 🖥️ Sistema")
+            novo_tema = st.radio("Tema Visual", ["Claro", "Escuro"], index=0 if st.session_state.theme == "Claro" else 1)
+            if novo_tema != st.session_state.theme:
+                st.session_state.theme = novo_tema
+                st.rerun()
+            
+            st.divider()
+            st.markdown("#### 🎯 Metas")
+            with st.form("form_metas"):
+                m_mensal = st.number_input("Meta Mensal (R$)", value=meta_mensal)
+                m_anual = st.number_input("Meta Anual (R$)", value=meta_anual)
+                if st.form_submit_button("Salvar Metas"):
+                    set_config('meta_mensal', m_mensal)
+                    set_config('meta_anual', m_anual)
+                    st.success("Salvo!"); st.rerun()
+
+    with tab_backup:
+        st.markdown("#### 📥 Exportar")
+        excel_data = converter_para_excel({
+            "Vendas": df_vendas_raw, "Despesas": df_despesas_raw,
+            "Clientes": df_clientes_raw, "Servicos": df_servicos
+        })
+        st.download_button("📊 Baixar Excel Completo", excel_data, f"Backup_{date.today()}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.divider()
+        with open(DB_NAME, "rb") as fp:
+            st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
 
 # --- ARQUIVOS ---
 elif escolha_menu == "📂 ARQUIVOS":

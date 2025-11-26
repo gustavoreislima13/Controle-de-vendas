@@ -450,7 +450,8 @@ elif escolha_menu == "💰 FINANCEIRO":
 elif escolha_menu == "⚙️ CONFIG":
     st.markdown("## ⚙️ Configurações")
     
-    tab_geral, tab_backup = st.tabs(["Cadastros & Aparência", "Backup & Relatórios"])
+    # --- ABA DE IMPORTAÇÃO ADICIONADA AQUI ---
+    tab_geral, tab_backup, tab_import = st.tabs(["Cadastros & Aparência", "Backup & Relatórios", "📥 Importar Dados"])
     
     with tab_geral:
         col_cadastros, col_sistema = st.columns(2)
@@ -513,6 +514,61 @@ elif escolha_menu == "⚙️ CONFIG":
         st.divider()
         with open(DB_NAME, "rb") as fp:
             st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
+
+    with tab_import:
+        st.markdown("#### 📥 Importar Clientes via CSV")
+        st.info("O ficheiro deve ter colunas 'Cliente' e 'Cpf'. Duplicados pelo CPF serão ignorados.")
+        uploaded_file = st.file_uploader("Arraste seu CSV aqui", type=["csv"])
+        
+        if uploaded_file:
+            if st.button("🚀 Processar Importação"):
+                with st.spinner("Lendo e importando... Aguarde..."):
+                    try:
+                        # --- CORREÇÃO AQUI: Adicionado encoding="latin-1" ---
+                        # Lê o CSV com separador ; e encoding compatível com Excel
+                        df_upload = pd.read_csv(uploaded_file, sep=";", encoding="latin-1")
+                        
+                        # Verifica colunas necessárias
+                        if "Cliente" in df_upload.columns and "Cpf" in df_upload.columns:
+                            # Prepara DataFrame
+                            df_upload = df_upload.rename(columns={"Cliente": "Nome", "Cpf": "CPF"})
+                            
+                            # Filtra duplicados dentro do próprio CSV
+                            df_upload = df_upload.drop_duplicates(subset=['CPF'])
+                            
+                            # Filtra duplicados que já estão no banco
+                            with sqlite3.connect(DB_NAME) as conn:
+                                existing = pd.read_sql("SELECT CPF FROM clientes", conn)
+                                existing_cpfs = set(existing["CPF"].dropna().astype(str))
+                                
+                                # Apenas novos
+                                df_new = df_upload[~df_upload["CPF"].astype(str).isin(existing_cpfs)].copy()
+                                
+                                if not df_new.empty:
+                                    # Adiciona colunas padrão
+                                    df_new["Email"] = ""
+                                    df_new["Telefone"] = ""
+                                    df_new["Data_Cadastro"] = str(date.today())
+                                    
+                                    # Usa o campo Produto para OBS se existir
+                                    if "Produto" in df_new.columns:
+                                        df_new["Obs"] = df_new["Produto"].apply(lambda x: f"Importado CSV - Produto: {x}" if pd.notnull(x) else "Importado CSV")
+                                    else:
+                                        df_new["Obs"] = "Importado CSV"
+                                    
+                                    # Seleciona apenas as colunas do banco
+                                    df_final = df_new[["Nome", "CPF", "Email", "Telefone", "Data_Cadastro", "Obs"]]
+                                    
+                                    # Insere no banco
+                                    df_final.to_sql("clientes", conn, if_exists="append", index=False)
+                                    st.success(f"✅ Sucesso! {len(df_final)} novos clientes importados.")
+                                    st.cache_data.clear()
+                                else:
+                                    st.warning("⚠️ Nenhum cliente novo encontrado (todos os CPFs já existem).")
+                        else:
+                            st.error("Erro: O arquivo CSV precisa ter as colunas 'Cliente' e 'Cpf'.")
+                    except Exception as e:
+                        st.error(f"Erro ao processar: {e}")
 
 # --- ARQUIVOS ---
 elif escolha_menu == "📂 ARQUIVOS":

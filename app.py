@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import os
 import sqlite3
 import io
+import pdfplumber
+import re
 from datetime import datetime, date
 from openai import OpenAI
 
@@ -72,10 +74,7 @@ def init_db():
         c.execute('CREATE TABLE IF NOT EXISTS consultores (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT)')
         c.execute('CREATE TABLE IF NOT EXISTS bancos (id INTEGER PRIMARY KEY AUTOINCREMENT, Banco TEXT, Agencia TEXT, Conta TEXT)')
         
-        # --- NOVA TABELA DE SERVIÇOS ---
         c.execute('CREATE TABLE IF NOT EXISTS servicos (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT)')
-        
-        # Preenche serviços padrão se estiver vazia (primeira vez)
         c.execute("SELECT count(*) FROM servicos")
         if c.fetchone()[0] == 0:
             padroes = [("Limpeza Nome",), ("Score",), ("Consultoria",), ("Jurídico",)]
@@ -91,7 +90,6 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Categoria TEXT, Descricao TEXT, Conta_Origem TEXT, Valor REAL
         )''')
         
-        # Migrações e Metas Padrão
         for col in ["Email", "Telefone", "Obs", "Conta_Recebimento"]:
             try: c.execute(f"ALTER TABLE vendas ADD COLUMN {col} TEXT"); 
             except: pass
@@ -155,6 +153,140 @@ def converter_para_excel(dfs_dict):
             df.to_excel(writer, index=False, sheet_name=name)
     return output.getvalue()
 
+# --- FUNÇÕES DE IMPORTAÇÃO AVANÇADA (PDF) ---
+
+def clean_currency(val_str):
+    """Converte strings monetárias R$ 1.000,00 para float 1000.00"""
+    if isinstance(val_str, (int, float)): return float(val_str)
+    if not val_str: return 0.0
+    # Remove R$, espaços e converte formato BR (1.000,00) para US (1000.00)
+    clean = str(val_str).replace("R$", "").replace(" ", "")
+    clean = clean.replace("R\\$", "") # Caso venha escapado
+    clean = clean.replace(".", "").replace(",", ".")
+    try:
+        return float(clean)
+    except:
+        return 0.0
+
+def parse_pdf_data(date_str):
+    """Tenta extrair data de strings sujas"""
+    if not date_str: return str(date.today())
+    # Regex para pegar DD/MM/YYYY
+    match = re.search(r'\d{2}/\d{2}/\d{4}', str(date_str))
+    if match:
+        d = match.group(0)
+        try:
+            dt_obj = datetime.strptime(d, "%d/%m/%Y").date()
+            return str(dt_obj)
+        except: pass
+    return str(date.today())
+
+def processar_pdf_financeiro(pdf_file, tipo_importacao):
+    """
+    Lê o PDF (RECEITAS ou DESPESAS) e mapeia colunas dinamicamente.
+    """
+    all_rows = []
+    
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            table = page.extract_table()
+            if table:
+                all_rows.extend(table)
+    
+    if not all_rows:
+        return None, "Nenhuma tabela encontrada no PDF. Verifique se é um arquivo de imagem."
+
+    # Cria DataFrame bruto
+    df = pd.DataFrame(all_rows[1:], columns=all_rows[0])
+    
+    # --- 1. LIMPEZA DE CABEÇALHOS ---
+    # Remove \n, espaços extras e deixa minusculo para comparação
+    cols_map = {}
+    for col in df.columns:
+        clean_col = str(col).replace("\n", "").replace("\r", "").strip()
+        cols_map[col] = clean_col
+    
+    df = df.rename(columns=cols_map)
+    
+    # --- 2. MAPEAMENTO INTELIGENTE ---
+    # Procura colunas chave independente da ordem
+    col_data = None
+    col_valor = None
+    col_desc = None
+    col_entidade = None # Cliente
+    col_categoria = None
+    col_conta = None
+
+    for col in df.columns:
+        c_lower = col.lower()
+        if "data" in c_lower: col_data = col
+        elif "valor" in c_lower: col_valor = col
+        elif "descri" in c_lower: col_desc = col
+        elif "entidade" in c_lower: col_entidade = col
+        elif "categoria" in c_lower: col_categoria = col
+        elif "conta" in c_lower: col_conta = col
+
+    # Fallback: Se não achar coluna Data/Valor pelo nome, tenta pela posição (comum em relatórios)
+    # Geralmente Data e Valor são as últimas colunas
+    if not col_valor and len(df.columns) > 1: col_valor = df.columns[-1]
+    if not col_data and len(df.columns) > 2: col_data = df.columns[-2]
+    
+    # --- 3. PROCESSAMENTO DE DADOS ---
+    df_final = pd.DataFrame()
+    
+    # Limpa valores nulos essenciais
+    df = df.dropna(subset=[col_valor]) if col_valor else df
+    
+    # Processa Data
+    if col_data:
+        df_final["Data"] = df[col_data].apply(parse_pdf_data)
+    else:
+        df_final["Data"] = str(date.today()) # Se não achar data, põe hoje
+        
+    # Processa Valor
+    if col_valor:
+        df_final["Valor"] = df[col_valor].apply(clean_currency)
+    else:
+        df_final["Valor"] = 0.0
+
+    # Pega descrições e limpa quebras de linha (\n) que vem do PDF
+    def clean_text(x):
+        if not x: return ""
+        return str(x).replace("\n", " ").replace("\r", " ").strip()
+
+    entidade_series = df[col_entidade].apply(clean_text) if col_entidade else pd.Series(["Cliente Diverso"] * len(df))
+    desc_series = df[col_desc].apply(clean_text) if col_desc else pd.Series(["Importado PDF"] * len(df))
+    cat_series = df[col_categoria].apply(clean_text) if col_categoria else pd.Series(["Geral"] * len(df))
+    conta_series = df[col_conta].apply(clean_text) if col_conta else pd.Series(["Banco"] * len(df))
+
+    # --- 4. PREPARAÇÃO PARA O BANCO ---
+    if tipo_importacao == "Receita":
+        # Mapeia para tabela VENDAS
+        df_final["Cliente"] = entidade_series
+        df_final["Servico"] = cat_series
+        df_final["Obs"] = desc_series
+        df_final["Conta_Recebimento"] = conta_series
+        
+        # Campos Padrão
+        df_final["Consultor"] = "Importado PDF"
+        df_final["Status_Pagamento"] = "Pago Total"
+        df_final["CPF"] = ""
+        df_final["Email"] = ""
+        df_final["Telefone"] = ""
+        df_final["Docs"] = "Relatório Importado"
+        
+        # Filtra apenas colunas que existem na tabela Vendas
+        return df_final[["Data", "Consultor", "Cliente", "CPF", "Email", "Telefone", "Servico", "Valor", "Status_Pagamento", "Conta_Recebimento", "Obs", "Docs"]], "OK"
+
+    else:
+        # Mapeia para tabela DESPESAS
+        df_final["Categoria"] = cat_series
+        df_final["Descricao"] = desc_series + " (" + entidade_series + ")"
+        df_final["Conta_Origem"] = conta_series
+        
+        return df_final[["Data", "Categoria", "Descricao", "Conta_Origem", "Valor"]], "OK"
+
+
 def chat_ia(df_v, df_d, user_msg, key):
     if not key: return "⚠️ Configure sua API Key."
     try:
@@ -172,7 +304,7 @@ def chat_ia(df_v, df_d, user_msg, key):
 # ==========================================
 with st.sidebar:
     st.title("💎 CMG Pro")
-    st.markdown("Manager v20.0")
+    st.markdown("Manager v22.0 (PDF Smart)")
     
     st.markdown("### Menu")
     menu_options = [
@@ -213,7 +345,7 @@ df_despesas_raw = load_data("despesas")
 df_clientes_raw = load_data("clientes")
 df_consultores = load_data("consultores")
 df_bancos = load_data("bancos")
-df_servicos = load_data("servicos") # CARREGA SERVIÇOS DO BANCO
+df_servicos = load_data("servicos")
 
 meta_mensal = get_config('meta_mensal')
 meta_anual = get_config('meta_anual')
@@ -410,7 +542,6 @@ elif escolha_menu == "👥 VENDAS":
                         if not df_clientes_raw.empty:
                             if cli in df_clientes_raw['Nome'].values: exists = True
                         if not exists:
-                            # --- CORREÇÃO AQUI: 6 Colunas e 6 Placeholders (?) ---
                             run_query("INSERT INTO clientes (Nome, CPF, Email, Telefone, Data_Cadastro, Obs) VALUES (?,?,?,?,?,?)", (cli, cpf, email, tel, str(date.today()), "Auto Venda"))
                         st.toast("Salvo!"); st.rerun()
     with c2:
@@ -450,7 +581,7 @@ elif escolha_menu == "💰 FINANCEIRO":
 elif escolha_menu == "⚙️ CONFIG":
     st.markdown("## ⚙️ Configurações")
     
-    # --- ABA DE IMPORTAÇÃO ADICIONADA AQUI ---
+    # --- ABAS DE CONFIGURAÇÃO ---
     tab_geral, tab_backup, tab_import = st.tabs(["Cadastros & Aparência", "Backup & Relatórios", "📥 Importar Dados"])
     
     with tab_geral:
@@ -516,59 +647,57 @@ elif escolha_menu == "⚙️ CONFIG":
             st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
 
     with tab_import:
-        st.markdown("#### 📥 Importar Clientes via CSV")
-        st.info("O ficheiro deve ter colunas 'Cliente' e 'Cpf'. Duplicados pelo CPF serão ignorados.")
-        uploaded_file = st.file_uploader("Arraste seu CSV aqui", type=["csv"])
+        st.markdown("### 📥 Importação Inteligente")
         
-        if uploaded_file:
-            if st.button("🚀 Processar Importação"):
-                with st.spinner("Lendo e importando... Aguarde..."):
-                    try:
-                        # --- CORREÇÃO AQUI: Adicionado encoding="latin-1" ---
-                        # Lê o CSV com separador ; e encoding compatível com Excel
-                        df_upload = pd.read_csv(uploaded_file, sep=";", encoding="latin-1")
+        tipo_arq = st.radio("O que você quer importar?", ["Clientes (CSV)", "Receitas (PDF)", "Despesas (PDF)"], horizontal=True)
+        
+        if tipo_arq == "Clientes (CSV)":
+            st.info("Arquivo CSV com colunas 'Cliente' e 'Cpf'.")
+            uploaded_file = st.file_uploader("Arraste seu CSV", type=["csv"])
+            if uploaded_file and st.button("Importar Clientes"):
+                try:
+                    df_upload = pd.read_csv(uploaded_file, sep=";", encoding="latin-1")
+                    if "Cliente" in df_upload.columns and "Cpf" in df_upload.columns:
+                        df_upload = df_upload.rename(columns={"Cliente": "Nome", "Cpf": "CPF"})
+                        df_upload = df_upload.drop_duplicates(subset=['CPF'])
                         
-                        # Verifica colunas necessárias
-                        if "Cliente" in df_upload.columns and "Cpf" in df_upload.columns:
-                            # Prepara DataFrame
-                            df_upload = df_upload.rename(columns={"Cliente": "Nome", "Cpf": "CPF"})
+                        with sqlite3.connect(DB_NAME) as conn:
+                            existing = pd.read_sql("SELECT CPF FROM clientes", conn)
+                            existing_cpfs = set(existing["CPF"].dropna().astype(str))
+                            df_new = df_upload[~df_upload["CPF"].astype(str).isin(existing_cpfs)].copy()
                             
-                            # Filtra duplicados dentro do próprio CSV
-                            df_upload = df_upload.drop_duplicates(subset=['CPF'])
-                            
-                            # Filtra duplicados que já estão no banco
-                            with sqlite3.connect(DB_NAME) as conn:
-                                existing = pd.read_sql("SELECT CPF FROM clientes", conn)
-                                existing_cpfs = set(existing["CPF"].dropna().astype(str))
-                                
-                                # Apenas novos
-                                df_new = df_upload[~df_upload["CPF"].astype(str).isin(existing_cpfs)].copy()
-                                
-                                if not df_new.empty:
-                                    # Adiciona colunas padrão
-                                    df_new["Email"] = ""
-                                    df_new["Telefone"] = ""
-                                    df_new["Data_Cadastro"] = str(date.today())
-                                    
-                                    # Usa o campo Produto para OBS se existir
-                                    if "Produto" in df_new.columns:
-                                        df_new["Obs"] = df_new["Produto"].apply(lambda x: f"Importado CSV - Produto: {x}" if pd.notnull(x) else "Importado CSV")
-                                    else:
-                                        df_new["Obs"] = "Importado CSV"
-                                    
-                                    # Seleciona apenas as colunas do banco
-                                    df_final = df_new[["Nome", "CPF", "Email", "Telefone", "Data_Cadastro", "Obs"]]
-                                    
-                                    # Insere no banco
-                                    df_final.to_sql("clientes", conn, if_exists="append", index=False)
-                                    st.success(f"✅ Sucesso! {len(df_final)} novos clientes importados.")
-                                    st.cache_data.clear()
-                                else:
-                                    st.warning("⚠️ Nenhum cliente novo encontrado (todos os CPFs já existem).")
-                        else:
-                            st.error("Erro: O arquivo CSV precisa ter as colunas 'Cliente' e 'Cpf'.")
-                    except Exception as e:
-                        st.error(f"Erro ao processar: {e}")
+                            if not df_new.empty:
+                                df_new["Email"] = ""
+                                df_new["Telefone"] = ""
+                                df_new["Data_Cadastro"] = str(date.today())
+                                df_new["Obs"] = "Importado CSV"
+                                df_final = df_new[["Nome", "CPF", "Email", "Telefone", "Data_Cadastro", "Obs"]]
+                                df_final.to_sql("clientes", conn, if_exists="append", index=False)
+                                st.success(f"✅ {len(df_final)} importados.")
+                                st.cache_data.clear()
+                            else: st.warning("Sem novos dados.")
+                except Exception as e: st.error(f"Erro: {e}")
+
+        elif tipo_arq in ["Receitas (PDF)", "Despesas (PDF)"]:
+            st.info(f"Importar relatório financeiro para {tipo_arq.split()[0]}.")
+            uploaded_file = st.file_uploader("Arraste seu PDF", type=["pdf"])
+            
+            if uploaded_file and st.button(f"Importar {tipo_arq}"):
+                with st.spinner("Lendo PDF..."):
+                    tipo_imp = "Receita" if "Receitas" in tipo_arq else "Despesa"
+                    df_imp, msg = processar_pdf_financeiro(uploaded_file, tipo_imp)
+                    
+                    if df_imp is not None:
+                        st.dataframe(df_imp.head())
+                        tabela_destino = "vendas" if tipo_imp == "Receita" else "despesas"
+                        
+                        with sqlite3.connect(DB_NAME) as conn:
+                            df_imp.to_sql(tabela_destino, conn, if_exists="append", index=False)
+                        
+                        st.success(f"✅ Sucesso! {len(df_imp)} registros adicionados em {tabela_destino}.")
+                        st.cache_data.clear()
+                    else:
+                        st.error(f"Erro ao ler PDF: {msg}")
 
 # --- ARQUIVOS ---
 elif escolha_menu == "📂 ARQUIVOS":

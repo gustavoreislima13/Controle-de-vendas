@@ -7,8 +7,8 @@ import sqlite3
 import io
 import pdfplumber
 import re
-import shutil  # Adicionado para apagar pastas
-import time    # Adicionado para delay na mensagem de sucesso
+import shutil   # Para apagar pastas
+import time     # Para delay na mensagem
 from datetime import datetime, date
 from openai import OpenAI
 
@@ -16,6 +16,49 @@ from openai import OpenAI
 # 1. CONFIGURAÇÃO INICIAL
 # ==========================================
 st.set_page_config(page_title="CMG System Pro", layout="wide", page_icon="💎")
+
+# ==========================================
+# 1.1 SISTEMA DE LOGIN E USUÁRIOS
+# ==========================================
+
+# Dicionário de Usuários (Login, Senha, Tema, Nome)
+USERS = {
+    "admin":      {"pass": "1234", "theme": "Escuro", "name": "Administrador"},
+    "gerente":    {"pass": "1234", "theme": "Escuro", "name": "Gerência"},
+    "financeiro": {"pass": "1234", "theme": "Escuro", "name": "Financeiro"},
+    "vendas1":    {"pass": "1234", "theme": "Claro",  "name": "Vendedor 01"},
+    "vendas2":    {"pass": "1234", "theme": "Claro",  "name": "Vendedor 02"}
+}
+
+def check_login():
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user_info = None
+
+    if not st.session_state.logged_in:
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c2:
+            st.markdown("<br><br><br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown("## 🔒 CMG System Login")
+                user = st.text_input("Usuário")
+                password = st.text_input("Senha", type="password")
+                
+                if st.button("Entrar", type="primary", use_container_width=True):
+                    if user in USERS and USERS[user]["pass"] == password:
+                        st.session_state.logged_in = True
+                        st.session_state.user_info = USERS[user]
+                        # Define o tema do usuário IMEDIATAMENTE ao logar
+                        st.session_state.theme = USERS[user]["theme"]
+                        st.rerun()
+                    else:
+                        st.error("Usuário ou senha incorretos.")
+        return False
+    return True
+
+# Se não estiver logado, para o código aqui
+if not check_login():
+    st.stop()
 
 # ==========================================
 # 2. FUNÇÕES AUXILIARES E FORMATAÇÃO BR
@@ -51,26 +94,36 @@ def init_db():
         
         c.execute('''CREATE TABLE IF NOT EXISTS vendas (
             id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Consultor TEXT, Cliente TEXT, CPF TEXT, 
-            Servico TEXT, Valor REAL, Status_Pagamento TEXT, Conta_Recebimento TEXT, Obs TEXT, Docs TEXT, Email TEXT, Telefone TEXT
-        )''')
-        c.execute('''CREATE TABLE IF NOT EXISTS despesas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Categoria TEXT, Descricao TEXT, Conta_Origem TEXT, Valor REAL
+            Servico TEXT, Valor REAL, Status_Pagamento TEXT, Conta_Recebimento TEXT, Obs TEXT, Docs TEXT, 
+            Email TEXT, Telefone TEXT, Empresa_Pagadora TEXT
         )''')
         
-        # Migrations de segurança
-        for col in ["Email", "Telefone", "Obs", "Conta_Recebimento"]:
+        c.execute('''CREATE TABLE IF NOT EXISTS despesas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Categoria TEXT, Descricao TEXT, 
+            Conta_Origem TEXT, Valor REAL, Fornecedor TEXT
+        )''')
+        
+        c.execute('''CREATE TABLE IF NOT EXISTS mural (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, Data TEXT, Titulo TEXT, Mensagem TEXT, Tipo TEXT, Autor TEXT
+        )''')
+        
+        # --- MIGRATIONS ---
+        colunas_vendas = ["Email", "Telefone", "Obs", "Conta_Recebimento", "Empresa_Pagadora"]
+        for col in colunas_vendas:
             try: c.execute(f"ALTER TABLE vendas ADD COLUMN {col} TEXT"); 
             except: pass
-        try: c.execute("ALTER TABLE despesas ADD COLUMN Conta_Origem TEXT"); 
-        except: pass
+            
+        colunas_despesas = ["Conta_Origem", "Fornecedor"]
+        for col in colunas_despesas:
+            try: c.execute(f"ALTER TABLE despesas ADD COLUMN {col} TEXT"); 
+            except: pass
         
-        # Inserir configurações padrão se não existirem
         try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('meta_mensal', '50000')")
         except: pass
         try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('meta_anual', '600000')")
         except: pass
-        try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('tema_preferido', 'Escuro')")
-        except: pass
+        
+        # Removemos a config de tema do banco, pois agora é por usuário
         
         conn.commit()
 
@@ -89,7 +142,7 @@ def load_data(table_name):
         try:
             df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
         except:
-            df = pd.DataFrame() # Retorna vazio se a tabela não existir
+            df = pd.DataFrame() 
     return df
 
 def get_config(chave):
@@ -97,17 +150,8 @@ def get_config(chave):
         c = conn.cursor()
         c.execute("SELECT valor FROM config WHERE chave=?", (chave,))
         res = c.fetchone()
-        try:
-            return float(res[0]) if res else 0.0
-        except:
-            return 0.0
-
-def get_config_text(chave):
-    with sqlite3.connect(DB_NAME) as conn:
-        c = conn.cursor()
-        c.execute("SELECT valor FROM config WHERE chave=?", (chave,))
-        res = c.fetchone()
-        return res[0] if res else None
+        try: return float(res[0]) if res else 0.0
+        except: return 0.0
 
 def set_config(chave, valor):
     with sqlite3.connect(DB_NAME) as conn:
@@ -116,7 +160,6 @@ def set_config(chave, valor):
         conn.commit()
     st.cache_data.clear()
 
-# --- ATUALIZAÇÃO SEGURA (MERGE) ---
 def update_full_table(df_edited_view, table_name):
     with sqlite3.connect(DB_NAME) as conn:
         df_full = pd.read_sql(f"SELECT * FROM {table_name}", conn)
@@ -146,7 +189,6 @@ def update_full_table(df_edited_view, table_name):
             df_full['Data'] = df_full['Data'].astype(str)
             
         df_full.to_sql(table_name, conn, if_exists='replace', index=False)
-        
     st.cache_data.clear()
 
 def salvar_arquivos(arquivos, nome_cliente):
@@ -172,9 +214,9 @@ def converter_para_excel(dfs_dict):
 # ==========================================
 # 4. SISTEMA DE TEMAS & CSS
 # ==========================================
+# O tema agora vem do login, mas garantimos um default
 if "theme" not in st.session_state:
-    tema_salvo = get_config_text("tema_preferido")
-    st.session_state.theme = tema_salvo if tema_salvo else "Escuro"
+    st.session_state.theme = "Escuro"
 
 CSS_BASE = """
 <style>
@@ -210,7 +252,33 @@ CSS_DARK = CSS_BASE + """
 """
 
 # ==========================================
-# 5. FUNÇÕES DE IMPORTAÇÃO
+# 5. FUNÇÕES DE FILTRO AVANÇADO
+# ==========================================
+def renderizar_filtros_avancados(df, multiselect_cols, search_cols=None, key_prefix="filter"):
+    df_filtrado = df.copy()
+    with st.expander("🔎 Filtros Avançados (Clique para abrir)", expanded=False):
+        if search_cols:
+            termo = st.text_input(f"Buscar por: {', '.join(search_cols)}", key=f"{key_prefix}_search")
+            if termo:
+                mask = pd.Series(False, index=df_filtrado.index)
+                for col in search_cols:
+                    if col in df_filtrado.columns:
+                        mask |= df_filtrado[col].astype(str).str.lower().str.contains(termo.lower(), na=False)
+                df_filtrado = df_filtrado[mask]
+        st.divider()
+        if multiselect_cols:
+            cols = st.columns(len(multiselect_cols))
+            for i, col in enumerate(multiselect_cols):
+                if col in df.columns:
+                    unique_values = df[col].dropna().unique()
+                    unique_values = sorted([str(x) for x in unique_values])
+                    selected = cols[i].multiselect(f"{col}", unique_values, key=f"{key_prefix}_{col}")
+                    if selected:
+                        df_filtrado = df_filtrado[df_filtrado[col].astype(str).isin(selected)]
+    return df_filtrado
+
+# ==========================================
+# 6. FUNÇÕES DE IMPORTAÇÃO
 # ==========================================
 def clean_currency(val_str):
     if pd.isna(val_str): return 0.0
@@ -307,6 +375,46 @@ def processar_arquivo_inteligente(file):
     df_final = df_final[df_final["Valor"] != 0]
     return df_final[["Conta", "Categoria", "Entidade", "Descrição", "Data", "Valor"]], "OK"
 
+def processar_arquivo_crm(file):
+    df = pd.DataFrame()
+    try:
+        if file.name.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file)
+        elif file.name.endswith('.csv'):
+            df = pd.read_csv(file)
+        else: return None, "Formato inválido (use Excel ou CSV)"
+    except Exception as e: return None, f"Erro ao ler: {e}"
+    
+    # Normalizar nomes das colunas
+    df.columns = [str(c).strip() for c in df.columns]
+    cols_lower = [c.lower() for c in df.columns]
+    
+    # Mapeamento inteligente
+    col_nome, col_cpf, col_email, col_tel, col_obs = None, None, None, None, None
+    
+    for i, col in enumerate(cols_lower):
+        if any(x in col for x in ['nome', 'cliente', 'name']): col_nome = df.columns[i]
+        elif any(x in col for x in ['cpf', 'cnpj', 'doc']): col_cpf = df.columns[i]
+        elif any(x in col for x in ['email', 'mail']): col_email = df.columns[i]
+        elif any(x in col for x in ['tel', 'cel', 'phone', 'whatsapp']): col_tel = df.columns[i]
+        elif any(x in col for x in ['obs', 'info']): col_obs = df.columns[i]
+        
+    if not col_nome: return None, "Coluna 'Nome' não encontrada."
+    
+    df_final = pd.DataFrame()
+    df_final['Nome'] = df[col_nome].astype(str).str.strip()
+    df_final['CPF'] = df[col_cpf].astype(str) if col_cpf else ""
+    df_final['Email'] = df[col_email].astype(str) if col_email else ""
+    df_final['Telefone'] = df[col_tel].astype(str) if col_tel else ""
+    df_final['Obs'] = df[col_obs].astype(str) if col_obs else "Importado"
+    df_final['Data_Cadastro'] = str(date.today())
+    
+    # Remove linhas sem nome
+    df_final = df_final[df_final['Nome'] != "nan"]
+    df_final = df_final[df_final['Nome'] != ""]
+    
+    return df_final, "OK"
+
 def classificar_lote_com_ia(df, api_key):
     if not api_key: return df
     try:
@@ -347,14 +455,20 @@ def chat_ia(df_v, df_d, user_msg, key):
     except Exception as e: return f"Erro IA: {e}"
 
 # ==========================================
-# 6. BARRA LATERAL
+# 7. BARRA LATERAL (COM LOGOUT)
 # ==========================================
 with st.sidebar:
+    # Cabeçalho com Info do Usuário
     st.title("💎 CMG Pro")
-    st.markdown("Manager v27.3 (Reset)")
+    st.caption(f"Olá, {st.session_state.user_info['name']}")
+    if st.button("Sair (Logout)"):
+        st.session_state.logged_in = False
+        st.rerun()
+    
+    st.divider()
     
     st.markdown("### Menu")
-    menu_options = ["📊 DASHBOARD", "🧮 PRECIFICAÇÃO", "📇 CRM", "👥 VENDAS", "💰 FINANCEIRO", "⚙️ CONFIG", "📂 ARQUIVOS", "🤖 I.A."]
+    menu_options = ["📊 DASHBOARD", "🧮 PRECIFICAÇÃO", "📇 CRM", "👥 VENDAS", "💰 FINANCEIRO", "📢 MURAL", "⚙️ CONFIG", "📂 ARQUIVOS", "🤖 I.A."]
     escolha_menu = st.radio("Ir para:", menu_options, label_visibility="collapsed")
     st.divider()
 
@@ -380,7 +494,7 @@ with st.sidebar:
     if not openai_key: openai_key = st.text_input("🔑 API Key", type="password")
 
 # ==========================================
-# 7. LÓGICA DE DADOS
+# 8. LÓGICA DE DADOS
 # ==========================================
 df_vendas_raw = load_data("vendas")
 df_despesas_raw = load_data("despesas")
@@ -388,6 +502,7 @@ df_clientes_raw = load_data("clientes")
 df_consultores = load_data("consultores")
 df_bancos = load_data("bancos")
 df_servicos = load_data("servicos")
+df_mural = load_data("mural")
 
 meta_mensal = get_config('meta_mensal')
 meta_anual = get_config('meta_anual')
@@ -396,12 +511,14 @@ meta_anual = get_config('meta_anual')
 if not df_vendas_raw.empty:
     df_vendas_raw['Data'] = pd.to_datetime(df_vendas_raw['Data'], errors='coerce').dt.date
     df_vendas_raw['Valor'] = pd.to_numeric(df_vendas_raw['Valor'], errors='coerce').fillna(0.0)
+    if 'Empresa_Pagadora' not in df_vendas_raw.columns: df_vendas_raw['Empresa_Pagadora'] = ""
 
 if not df_despesas_raw.empty:
     df_despesas_raw['Data'] = pd.to_datetime(df_despesas_raw['Data'], errors='coerce').dt.date
     df_despesas_raw['Valor'] = pd.to_numeric(df_despesas_raw['Valor'], errors='coerce').fillna(0.0)
+    if 'Fornecedor' not in df_despesas_raw.columns: df_despesas_raw['Fornecedor'] = ""
 
-# FILTRO
+# FILTRO DE DATA
 if tipo_filtro != "Todo Histórico" and data_inicio and data_fim:
     df_vendas = df_vendas_raw[(df_vendas_raw['Data'] >= data_inicio) & (df_vendas_raw['Data'] <= data_fim)].copy() if not df_vendas_raw.empty else df_vendas_raw
     df_despesas = df_despesas_raw[(df_despesas_raw['Data'] >= data_inicio) & (df_despesas_raw['Data'] <= data_fim)].copy() if not df_despesas_raw.empty else df_despesas_raw
@@ -413,7 +530,7 @@ lista_consultores = df_consultores["Nome"].tolist() if not df_consultores.empty 
 lista_bancos = df_bancos["Banco"].tolist() if not df_bancos.empty else ["Caixa Principal"]
 lista_servicos = df_servicos["Nome"].tolist() if not df_servicos.empty else ["Geral"]
 
-# TEMA CSS
+# TEMA CSS - APLICAÇÃO
 if st.session_state.theme == "Claro":
     st.markdown(CSS_LIGHT, unsafe_allow_html=True)
     cor_grafico = ["#6366F1", "#3B82F6", "#10B981", "#F59E0B"]
@@ -426,18 +543,33 @@ else:
     txt_chart = "white"
 
 # ==========================================
-# 8. ROTEAMENTO
+# 9. ROTEAMENTO
 # ==========================================
 
 # --- DASHBOARD ---
 if escolha_menu == "📊 DASHBOARD":
     st.markdown("## 📊 Visão Geral")
-    termo_busca = st.text_input("🔍 Buscar rápido...", placeholder="Digite para filtrar os dados abaixo...")
-    df_v = df_vendas.copy()
-    if termo_busca and not df_v.empty:
-        mask = df_v.astype(str).apply(lambda x: x.str.lower().str.contains(termo_busca.lower())).any(axis=1)
-        df_v = df_v[mask]
+    
+    if not df_mural.empty:
+        ultimos_avisos = df_mural.sort_values(by="id", ascending=False).head(3)
+        with st.expander("📢 Mural de Avisos e Novidades", expanded=True):
+            for index, row in ultimos_avisos.iterrows():
+                icone = "🔵" if row['Tipo'] == "Informativo" else "🟢" if row['Tipo'] == "Novidade" else "🔴"
+                if row['Tipo'] == "Urgente":
+                    st.error(f"**{row['Titulo']}** ({row['Data']}) - {row['Mensagem']}")
+                elif row['Tipo'] == "Novidade":
+                    st.success(f"**{row['Titulo']}** ({row['Data']}) - {row['Mensagem']}")
+                else:
+                    st.info(f"**{row['Titulo']}** ({row['Data']}) - {row['Mensagem']}")
 
+    # --- FILTRO AVANÇADO GLOBAL PARA O DASHBOARD ---
+    df_v = df_vendas.copy()
+    if not df_v.empty:
+        df_v = renderizar_filtros_avancados(df_v, 
+                                            multiselect_cols=["Consultor", "Servico", "Status_Pagamento", "Conta_Recebimento"], 
+                                            search_cols=["Cliente", "CPF", "Empresa_Pagadora"],
+                                            key_prefix="dash")
+    
     fat = df_v["Valor"].sum() if not df_v.empty else 0
     desp = df_despesas["Valor"].sum() if not df_despesas.empty else 0
     lucro = fat - desp
@@ -543,37 +675,60 @@ elif escolha_menu == "📇 CRM":
 # --- VENDAS ---
 elif escolha_menu == "👥 VENDAS":
     st.markdown("## 👥 Vendas")
-    busca_vendas = st.text_input("🔍 Filtrar Vendas...", placeholder="Cliente, Consultor...")
+    
+    # --- FILTRO AVANÇADO VENDAS (Texto + Multiselect) ---
     df_v = df_vendas.copy()
-    if busca_vendas and not df_v.empty:
-        mask = df_v.astype(str).apply(lambda x: x.str.lower().str.contains(busca_vendas.lower())).any(axis=1)
-        df_v = df_v[mask]
+    if not df_v.empty:
+        df_v = renderizar_filtros_avancados(df_v, 
+                                            multiselect_cols=["Consultor", "Servico", "Status_Pagamento", "Conta_Recebimento"], 
+                                            search_cols=["Cliente", "CPF", "Empresa_Pagadora"],
+                                            key_prefix="vendas")
         
+        # Mostra totais filtrados
+        f_total = df_v["Valor"].sum()
+        f_qtd = len(df_v)
+        c_tot1, c_tot2 = st.columns(2)
+        c_tot1.metric("Total Filtrado", format_brl(f_total))
+        c_tot2.metric("Qtd. Vendas", f_qtd)
+        st.divider()
+
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
-            st.markdown("#### Lançar")
+            st.markdown("#### Lançar Venda")
             with st.form("venda"):
                 cons = st.selectbox("Consultor", lista_consultores)
-                c_cli, c_cpf = st.columns(2)
-                cli = c_cli.text_input("Cliente*")
-                cpf = c_cpf.text_input("CPF")
+                
+                # Campos de Cliente
+                c_cli, c_pag = st.columns(2)
+                cli = c_cli.text_input("Cliente (Pessoa)*")
+                pag = c_pag.text_input("Empresa Pagadora")
+                
+                c_cpf, c_doc = st.columns(2)
+                cpf = c_cpf.text_input("CPF/CNPJ")
+                
                 c_email, c_tel = st.columns(2)
                 email = c_email.text_input("Email")
                 tel = c_tel.text_input("Telefone")
+                
                 serv = st.selectbox("Serviço", lista_servicos)
                 val = st.number_input("Valor", min_value=0.0)
+                
                 c_stts, c_conta = st.columns(2)
                 stt = c_stts.selectbox("Status", ["Pago Total", "Parcial", "Pendente"])
                 cnt = c_conta.selectbox("Recebido em", lista_bancos)
+                
                 obs = st.text_area("Obs")
                 docs = st.file_uploader("Docs", accept_multiple_files=True)
                 
-                if st.form_submit_button("Salvar"):
+                if st.form_submit_button("Salvar Venda"):
                     if cli:
                         qtd = salvar_arquivos(docs, cli)
-                        run_query("INSERT INTO vendas (Data, Consultor, Cliente, CPF, Email, Telefone, Servico, Valor, Status_Pagamento, Conta_Recebimento, Obs, Docs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", 
-                                  (str(date.today()), cons, cli, cpf, email, tel, serv, val, stt, cnt, obs, f"{qtd} arqs"))
+                        empresa_final = pag if pag else cli
+                        
+                        run_query("INSERT INTO vendas (Data, Consultor, Cliente, CPF, Email, Telefone, Servico, Valor, Status_Pagamento, Conta_Recebimento, Obs, Docs, Empresa_Pagadora) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", 
+                                  (str(date.today()), cons, cli, cpf, email, tel, serv, val, stt, cnt, obs, f"{qtd} arqs", empresa_final))
+                        
                         exists = False
                         if not df_clientes_raw.empty:
                             if cli in df_clientes_raw['Nome'].values: exists = True
@@ -581,11 +736,17 @@ elif escolha_menu == "👥 VENDAS":
                             run_query("INSERT INTO clientes (Nome, CPF, Email, Telefone, Data_Cadastro, Obs) VALUES (?,?,?,?,?,?)", (cli, cpf, email, tel, str(date.today()), "Auto Venda"))
                         st.toast("Salvo!"); st.rerun()
     with c2:
-        st.markdown("#### Histórico")
+        st.markdown("#### Histórico de Vendas")
         if not df_v.empty:
             if "Excluir" not in df_v.columns: df_v.insert(0, "Excluir", False)
             df_v_editor = df_v.copy()
             if 'Data' in df_v_editor.columns: df_v_editor['Data'] = df_v_editor['Data'].astype(str)
+            
+            # Reordenar
+            cols_order = ["Excluir", "Data", "Cliente", "Empresa_Pagadora", "Servico", "Valor", "Status_Pagamento", "Consultor", "Conta_Recebimento", "id"]
+            cols_existentes = [c for c in cols_order if c in df_v_editor.columns]
+            df_v_editor = df_v_editor[cols_existentes]
+
             ed_v = st.data_editor(df_v_editor, hide_index=True, use_container_width=True, column_config={"id": st.column_config.NumberColumn(disabled=True)})
             if st.button("💾 Atualizar Vendas"):
                 update_full_table(ed_v, "vendas"); st.rerun()
@@ -593,75 +754,114 @@ elif escolha_menu == "👥 VENDAS":
 # --- FINANCEIRO ---
 elif escolha_menu == "💰 FINANCEIRO":
     st.markdown("## 💰 Financeiro")
+    
+    # --- FILTRO AVANÇADO FINANCEIRO (Texto + Multiselect) ---
+    df_d = df_despesas.copy()
+    if not df_d.empty:
+        df_d = renderizar_filtros_avancados(df_d, 
+                                            multiselect_cols=["Categoria", "Conta_Origem"],
+                                            search_cols=["Descricao", "Fornecedor"],
+                                            key_prefix="fin")
+        
+        # Mostra totais filtrados
+        d_total = df_d["Valor"].sum()
+        st.metric("Total Despesas Filtradas", format_brl(d_total), delta="Saída", delta_color="inverse")
+        st.divider()
+
     c1, c2 = st.columns([1, 2])
     with c1:
         with st.container(border=True):
             st.markdown("#### Lançar Saída")
             desc = st.text_input("Descrição")
+            fornecedor = st.text_input("Fornecedor / Quem recebeu")
             cat = st.selectbox("Categoria", ["Fixo", "Comissões", "Marketing", "Impostos", "Pessoal", "Transporte"])
             con = st.selectbox("Saiu de", lista_bancos)
             val = st.number_input("Valor", min_value=0.0)
-            if st.button("Salvar"):
-                run_query("INSERT INTO despesas (Data, Categoria, Descricao, Conta_Origem, Valor) VALUES (?,?,?,?,?)",
-                          (str(date.today()), cat, desc, con, val))
+            if st.button("Salvar Despesa"):
+                run_query("INSERT INTO despesas (Data, Categoria, Descricao, Conta_Origem, Valor, Fornecedor) VALUES (?,?,?,?,?,?)",
+                          (str(date.today()), cat, desc, con, val, fornecedor))
                 st.toast("Salvo!"); st.rerun()
     with c2:
         st.markdown("#### Despesas")
-        if not df_despesas.empty:
-            if "Excluir" not in df_despesas.columns: df_despesas.insert(0, "Excluir", False)
-            df_d_editor = df_despesas.copy()
+        if not df_d.empty:
+            if "Excluir" not in df_d.columns: df_d.insert(0, "Excluir", False)
+            df_d_editor = df_d.copy()
             if 'Data' in df_d_editor.columns: df_d_editor['Data'] = df_d_editor['Data'].astype(str)
+            
+            # Reordenar
+            cols_order = ["Excluir", "Data", "Descricao", "Fornecedor", "Categoria", "Valor", "Conta_Origem", "id"]
+            cols_existentes = [c for c in cols_order if c in df_d_editor.columns]
+            df_d_editor = df_d_editor[cols_existentes]
+            
             ed_d = st.data_editor(df_d_editor, hide_index=True, use_container_width=True)
             if st.button("💾 Atualizar Finanças"):
                  update_full_table(ed_d, "despesas"); st.rerun()
 
+# --- MURAL ---
+elif escolha_menu == "📢 MURAL":
+    st.markdown("## 📢 Mural de Avisos")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        with st.container(border=True):
+            st.markdown("#### Novo Aviso")
+            with st.form("form_mural"):
+                titulo = st.text_input("Título")
+                msg = st.text_area("Mensagem")
+                tipo = st.selectbox("Tipo", ["Informativo", "Novidade", "Urgente"])
+                autor = st.text_input("Autor (Opcional)", value=st.session_state.user_info['name'])
+                if st.form_submit_button("📌 Postar Aviso"):
+                    if titulo and msg:
+                        run_query("INSERT INTO mural (Data, Titulo, Mensagem, Tipo, Autor) VALUES (?,?,?,?,?)",
+                                  (str(date.today()), titulo, msg, tipo, autor))
+                        st.success("Aviso postado!"); st.rerun()
+                    else: st.warning("Preencha título e mensagem.")
+    with c2:
+        st.markdown("#### 📌 Quadro de Avisos")
+        if not df_mural.empty:
+            df_m_edit = df_mural.copy().sort_values(by="id", ascending=False)
+            if "Excluir" not in df_m_edit.columns: df_m_edit.insert(0, "Excluir", False)
+            for index, row in df_m_edit.head(5).iterrows():
+                if row['Tipo'] == "Urgente":
+                    st.error(f"**{row['Titulo']}**\n\n{row['Mensagem']}\n\n*Postado em: {row['Data']} por {row['Autor']}*")
+                elif row['Tipo'] == "Novidade":
+                    st.success(f"**{row['Titulo']}**\n\n{row['Mensagem']}\n\n*Postado em: {row['Data']} por {row['Autor']}*")
+                else:
+                    st.info(f"**{row['Titulo']}**\n\n{row['Mensagem']}\n\n*Postado em: {row['Data']} por {row['Autor']}*")
+            st.divider()
+            with st.expander("Gerenciar Histórico Completo (Excluir)"):
+                ed_mural = st.data_editor(df_m_edit, hide_index=True, use_container_width=True, key="editor_mural")
+                if st.button("💾 Atualizar Mural"):
+                    update_full_table(ed_mural, "mural"); st.rerun()
+        else: st.info("Nenhum aviso no mural ainda.")
+
 # --- CONFIG ---
 elif escolha_menu == "⚙️ CONFIG":
     st.markdown("## ⚙️ Configurações")
-    
-    # -----------------------------------------------
-    # NOVO: ZONA DE PERIGO (RESET DE FÁBRICA)
-    # -----------------------------------------------
     with st.expander("🚨 ZONA DE PERIGO (Apagar Tudo)", expanded=False):
         st.error("⚠️ ATENÇÃO: AÇÃO DESTRUTIVA")
-        st.markdown("Esta ação irá **apagar todas as vendas, clientes, despesas e arquivos** permanentemente. O sistema voltará ao estado original (vazio).")
-        
+        st.markdown("Esta ação irá **apagar todas as vendas, clientes, despesas, avisos e arquivos** permanentemente.")
         col_reset1, col_reset2 = st.columns([3, 1])
-        with col_reset1:
-            check_reset = st.checkbox("Eu entendo que vou perder todos os dados e quero continuar.")
+        with col_reset1: check_reset = st.checkbox("Eu entendo que vou perder todos os dados e quero continuar.")
         with col_reset2:
             if check_reset:
                 if st.button("🗑️ EXCLUIR TUDO AGORA", type="primary"):
                     try:
                         with sqlite3.connect(DB_NAME) as conn:
                             c = conn.cursor()
-                            # Lista de tabelas para limpar (mantendo a estrutura)
-                            tables_to_clear = ["vendas", "despesas", "clientes", "consultores", "bancos", "servicos", "config"]
+                            tables_to_clear = ["vendas", "despesas", "clientes", "consultores", "bancos", "servicos", "config", "mural"]
                             for t in tables_to_clear:
-                                try:
-                                    c.execute(f"DELETE FROM {t}")
-                                except: pass # Se a tabela não existir, ignora
+                                try: c.execute(f"DELETE FROM {t}")
+                                except: pass
                             conn.commit()
-                        
-                        # Apagar pasta de arquivos físicos
                         if os.path.exists(BASE_DIR_ARQUIVOS):
                             shutil.rmtree(BASE_DIR_ARQUIVOS)
                             os.makedirs(BASE_DIR_ARQUIVOS)
-                            
-                        # Limpar cache e reiniciar
                         st.cache_data.clear()
                         st.session_state.clear()
-                        
-                        st.success("♻️ SISTEMA FORMATADO COM SUCESSO!")
-                        time.sleep(2)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao resetar: {e}")
-    
+                        st.success("♻️ SISTEMA FORMATADO COM SUCESSO!"); time.sleep(2); st.rerun()
+                    except Exception as e: st.error(f"Erro ao resetar: {e}")
     st.divider()
-    
     tab_geral, tab_backup, tab_import = st.tabs(["Cadastros & Aparência", "Backup & Relatórios", "📥 Importação"])
-    
     with tab_geral:
         col_cadastros, col_sistema = st.columns(2)
         with col_cadastros:
@@ -674,32 +874,22 @@ elif escolha_menu == "⚙️ CONFIG":
                 if not df_servicos.empty: 
                     if "Excluir" not in df_servicos.columns: df_servicos.insert(0, "Excluir", False)
                     ed_s = st.data_editor(df_servicos, hide_index=True, key="editor_servicos")
-                    if st.button("Salvar Serviços"):
-                        update_full_table(ed_s, "servicos"); st.rerun()
-
+                    if st.button("Salvar Serviços"): update_full_table(ed_s, "servicos"); st.rerun()
             with st.expander("Consultores"):
                 with st.form("add_c"):
                     nm = st.text_input("Novo Consultor")
                     if st.form_submit_button("Add") and nm: 
                         run_query("INSERT INTO consultores (Nome) VALUES (?)", (nm,)); st.rerun()
                 if not df_consultores.empty: st.dataframe(df_consultores, hide_index=True)
-            
             with st.expander("Contas Bancárias"):
                 with st.form("add_b"):
                     nb = st.text_input("Novo Banco")
                     if st.form_submit_button("Add") and nb: 
                         run_query("INSERT INTO bancos (Banco) VALUES (?)", (nb,)); st.rerun()
                 if not df_bancos.empty: st.dataframe(df_bancos, hide_index=True)
-
         with col_sistema:
             st.markdown("#### 🖥️ Sistema")
-            st.write("**Aparência**")
-            current_theme_idx = 0 if st.session_state.theme == "Claro" else 1
-            novo_tema = st.radio("Selecione o tema:", ["Claro", "Escuro"], index=current_theme_idx)
-            if novo_tema != st.session_state.theme:
-                st.session_state.theme = novo_tema
-                set_config('tema_preferido', novo_tema)
-                st.rerun()
+            st.info("Para alterar o tema, faça login com o usuário correspondente.")
             
             st.divider()
             st.markdown("#### 🎯 Metas")
@@ -707,41 +897,47 @@ elif escolha_menu == "⚙️ CONFIG":
                 m_mensal = st.number_input("Meta Mensal (R$)", value=meta_mensal)
                 m_anual = st.number_input("Meta Anual (R$)", value=meta_anual)
                 if st.form_submit_button("Salvar Metas"):
-                    set_config('meta_mensal', m_mensal)
-                    set_config('meta_anual', m_anual)
-                    st.success("Salvo!"); st.rerun()
-
+                    set_config('meta_mensal', m_mensal); set_config('meta_anual', m_anual); st.success("Salvo!"); st.rerun()
     with tab_backup:
         st.markdown("#### 📥 Exportar")
-        excel_data = converter_para_excel({
-            "Vendas": df_vendas_raw, "Despesas": df_despesas_raw,
-            "Clientes": df_clientes_raw, "Servicos": df_servicos
-        })
+        excel_data = converter_para_excel({"Vendas": df_vendas_raw, "Despesas": df_despesas_raw, "Clientes": df_clientes_raw, "Servicos": df_servicos, "Mural": df_mural})
         st.download_button("📊 Baixar Excel Completo", excel_data, f"Backup_{date.today()}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.divider()
-        with open(DB_NAME, "rb") as fp:
-            st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
-
+        with open(DB_NAME, "rb") as fp: st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
     with tab_import:
         st.markdown("### 📥 Importação em Lote")
-        st.info("Suporta múltiplos arquivos (PDF/Excel) de uma só vez. Limite recomendado: 50 arqs.")
-        tipo_arq = st.radio("Tipo de Lançamento:", ["Receitas (Vendas)", "Despesas (Saídas)"], horizontal=True)
-        uploaded_files = st.file_uploader("Arraste seus arquivos aqui", type=["pdf", "xlsx", "xls"], accept_multiple_files=True)
+        st.info("Suporta múltiplos arquivos (PDF/Excel) de uma só vez.")
+        
+        # ATUALIZAÇÃO: Opção de Clientes
+        tipo_arq = st.radio("Tipo de Lançamento:", ["Receitas (Vendas)", "Despesas (Saídas)", "Clientes (CRM)"], horizontal=True)
+        
+        uploaded_files = st.file_uploader("Arraste seus arquivos aqui", type=["pdf", "xlsx", "xls", "csv"], accept_multiple_files=True)
         if uploaded_files:
-            tipo_imp = "Receita" if "Receitas" in tipo_arq else "Despesa"
             upload_id = str(sorted([f.name for f in uploaded_files]))
+            
+            # Reset se mudar os arquivos
             if "df_preview" not in st.session_state or st.session_state.get("upload_id") != upload_id:
                 lista_dfs_processados = []
                 erros_leitura = []
                 progresso = st.progress(0, text="Lendo arquivos...")
                 total_arquivos = len(uploaded_files)
+                
                 for i, file in enumerate(uploaded_files):
                     progresso.progress((i + 1) / total_arquivos, text=f"Lendo {file.name}...")
-                    df_res, msg = processar_arquivo_inteligente(file)
+                    
+                    if "Clientes" in tipo_arq:
+                        # Processamento CRM
+                        df_res, msg = processar_arquivo_crm(file)
+                    else:
+                        # Processamento Financeiro
+                        df_res, msg = processar_arquivo_inteligente(file)
+                        if df_res is not None and not df_res.empty:
+                             if "Despesas" in tipo_arq: df_res["Valor"] = df_res["Valor"].abs()
+
                     if df_res is not None and not df_res.empty:
-                        if tipo_imp == "Despesa": df_res["Valor"] = df_res["Valor"].abs()
                         lista_dfs_processados.append(df_res)
                     else: erros_leitura.append(f"{file.name}: {msg}")
+                    
                 progresso.empty()
                 if lista_dfs_processados:
                     df_final_preview = pd.concat(lista_dfs_processados, ignore_index=True)
@@ -753,26 +949,43 @@ elif escolha_menu == "⚙️ CONFIG":
             if "df_preview" in st.session_state:
                 df_p = st.session_state.df_preview
                 st.markdown(f"#### 📝 Prévia ({len(df_p)} registros)")
-                c_ia, c_limpar = st.columns([1, 4])
-                if c_ia.button("✨ Completar Tudo com IA"):
-                    with st.spinner("Classificando..."):
-                        df_p = classificar_lote_com_ia(df_p, openai_key)
-                        st.session_state.df_preview = df_p
+                
+                # Botões de IA apenas se não for CRM
+                if "Clientes" not in tipo_arq:
+                    c_ia, c_limpar = st.columns([1, 4])
+                    if c_ia.button("✨ Completar Tudo com IA"):
+                        with st.spinner("Classificando..."):
+                            df_p = classificar_lote_com_ia(df_p, openai_key)
+                            st.session_state.df_preview = df_p; st.rerun()
+                    if c_limpar.button("Limpar Tudo"):
+                        del st.session_state["df_preview"]
+                        if "upload_id" in st.session_state: del st.session_state["upload_id"]
                         st.rerun()
-                if c_limpar.button("Limpar Tudo"):
-                    del st.session_state["df_preview"]
-                    if "upload_id" in st.session_state: del st.session_state["upload_id"]
-                    st.rerun()
+                else:
+                    if st.button("Limpar Tudo"):
+                        del st.session_state["df_preview"]
+                        del st.session_state["upload_id"]
+                        st.rerun()
 
                 edited_df = st.data_editor(df_p, num_rows="dynamic", use_container_width=True)
+                
                 if st.button(f"✅ Confirmar Importação"):
                     try:
-                        edited_df['Data'] = edited_df['Data'].astype(str)
                         with sqlite3.connect(DB_NAME) as conn:
-                            if tipo_imp == "Receita":
+                            if "Clientes" in tipo_arq:
+                                # Salva Clientes
+                                df_b = edited_df.copy()
+                                # Garante que as colunas batem com o banco
+                                df_b = df_b[["Nome", "CPF", "Email", "Telefone", "Data_Cadastro", "Obs"]]
+                                df_b.to_sql("clientes", conn, if_exists="append", index=False)
+                                
+                            elif "Receitas" in tipo_arq:
+                                # Salva Vendas
+                                edited_df['Data'] = edited_df['Data'].astype(str)
                                 df_b = pd.DataFrame()
                                 df_b["Data"] = edited_df["Data"]
                                 df_b["Cliente"] = edited_df["Entidade"]
+                                df_b["Empresa_Pagadora"] = edited_df["Entidade"]
                                 df_b["Servico"] = edited_df["Categoria"]
                                 df_b["Conta_Recebimento"] = edited_df["Conta"]
                                 df_b["Obs"] = edited_df["Descrição"]
@@ -781,18 +994,21 @@ elif escolha_menu == "⚙️ CONFIG":
                                 df_b["Status_Pagamento"] = "Pago Total"
                                 df_b.to_sql("vendas", conn, if_exists="append", index=False)
                             else:
+                                # Salva Despesas
+                                edited_df['Data'] = edited_df['Data'].astype(str)
                                 df_b = pd.DataFrame()
                                 df_b["Data"] = edited_df["Data"]
                                 df_b["Categoria"] = edited_df["Categoria"]
                                 df_b["Conta_Origem"] = edited_df["Conta"]
-                                df_b["Descricao"] = edited_df["Descrição"] + " (" + edited_df["Entidade"] + ")"
+                                df_b["Descricao"] = edited_df["Descrição"]
+                                df_b["Fornecedor"] = edited_df["Entidade"]
                                 df_b["Valor"] = edited_df["Valor"]
                                 df_b.to_sql("despesas", conn, if_exists="append", index=False)
+                                
                         st.success(f"Sucesso!")
                         del st.session_state["df_preview"]
                         del st.session_state["upload_id"]
-                        st.cache_data.clear()
-                        st.rerun()
+                        st.cache_data.clear(); st.rerun()
                     except Exception as e: st.error(f"Erro ao salvar: {e}")
 
 # --- ARQUIVOS ---

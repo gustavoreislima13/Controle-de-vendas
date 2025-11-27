@@ -251,7 +251,6 @@ def processar_arquivo_inteligente(file):
     s_desc = get_col_by_keyword(['descri', 'histórico', 'memo', 'lançamento', 'discriminacao'])
     
     # Fallback Inteligente para Descrição:
-    # Se não achou pelo nome, pega a coluna de TEXTO com maior tamanho médio (maior número de caracteres)
     if s_desc is None:
         max_len = 0
         best_col_idx = -1
@@ -718,70 +717,97 @@ elif escolha_menu == "⚙️ CONFIG":
         with open(DB_NAME, "rb") as fp:
             st.download_button("🗄️ Baixar Banco (.db)", fp, f"backup_{DB_NAME}", "application/x-sqlite3")
 
-    # --- ABA DE IMPORTAÇÃO MODIFICADA ---
+    # --- ABA DE IMPORTAÇÃO MODIFICADA PARA MÚLTIPLOS ARQUIVOS ---
     with tab_import:
-        st.markdown("### 📥 Importação Financeira")
-        st.info("Colunas Fixas: Conta, Categoria, Entidade, Descrição, Data, Valor")
+        st.markdown("### 📥 Importação em Lote")
+        st.info("Suporta múltiplos arquivos (PDF/Excel) de uma só vez. Limite recomendado: 50 arqs.")
         
-        tipo_arq = st.radio("Tipo:", ["Receitas", "Despesas"], horizontal=True)
-        uploaded_file = st.file_uploader("Arraste PDF ou Excel", type=["pdf", "xlsx", "xls"])
+        tipo_arq = st.radio("Tipo de Lançamento:", ["Receitas (Vendas)", "Despesas (Saídas)"], horizontal=True)
+        # MODIFICAÇÃO: accept_multiple_files=True
+        uploaded_files = st.file_uploader("Arraste seus arquivos aqui", type=["pdf", "xlsx", "xls"], accept_multiple_files=True)
         
-        if uploaded_file:
+        if uploaded_files:
             tipo_imp = "Receita" if "Receitas" in tipo_arq else "Despesa"
             
-            # Carrega e mantém no estado
-            if "df_preview" not in st.session_state or st.session_state.get("arquivo_atual") != uploaded_file.name:
-                with st.spinner("Lendo arquivo..."):
-                    df_res, msg = processar_arquivo_inteligente(uploaded_file)
-                    if df_res is not None:
-                        # Se for despesa, garante que valor seja positivo para visualização
+            # Cria ID único baseado nos nomes dos arquivos para saber se mudou o upload
+            upload_id = str(sorted([f.name for f in uploaded_files]))
+            
+            # Só processa se for um upload novo ou se ainda não tiver processado
+            if "df_preview" not in st.session_state or st.session_state.get("upload_id") != upload_id:
+                
+                lista_dfs_processados = []
+                erros_leitura = []
+                
+                progresso = st.progress(0, text="Lendo arquivos...")
+                total_arquivos = len(uploaded_files)
+                
+                for i, file in enumerate(uploaded_files):
+                    progresso.progress((i + 1) / total_arquivos, text=f"Lendo {file.name}...")
+                    
+                    # Processa cada arquivo individualmente
+                    df_res, msg = processar_arquivo_inteligente(file)
+                    
+                    if df_res is not None and not df_res.empty:
+                        # Ajuste de sinal se for despesa
                         if tipo_imp == "Despesa":
                             df_res["Valor"] = df_res["Valor"].abs()
-                        st.session_state.df_preview = df_res
-                        st.session_state.arquivo_atual = uploaded_file.name
+                        lista_dfs_processados.append(df_res)
                     else:
-                        st.error(msg)
+                        erros_leitura.append(f"{file.name}: {msg}")
+                
+                progresso.empty() # Remove barra de progresso
+                
+                if lista_dfs_processados:
+                    # Concatena (Junta) todos os DataFrames num só
+                    df_final_preview = pd.concat(lista_dfs_processados, ignore_index=True)
+                    st.session_state.df_preview = df_final_preview
+                    st.session_state.upload_id = upload_id
+                    if erros_leitura:
+                        st.warning(f"Alguns arquivos não foram lidos: {', '.join(erros_leitura)}")
+                else:
+                    st.error("Nenhum dado válido encontrado nos arquivos enviados.")
             
+            # Exibe e permite editar o DataFrame consolidado
             if "df_preview" in st.session_state:
                 df_p = st.session_state.df_preview
                 
+                st.markdown(f"#### 📝 Prévia Consolidada ({len(df_p)} registros)")
+                
                 c_ia, c_limpar = st.columns([1, 4])
-                if c_ia.button("✨ Completar com IA"):
-                    with st.spinner("Classificando..."):
+                if c_ia.button("✨ Completar Tudo com IA"):
+                    with st.spinner("Classificando em lote..."):
                         df_p = classificar_lote_com_ia(df_p, openai_key)
                         st.session_state.df_preview = df_p
                         st.rerun()
                 
-                if c_limpar.button("Recarregar"):
+                if c_limpar.button("Limpar Tudo"):
                     del st.session_state["df_preview"]
+                    if "upload_id" in st.session_state: del st.session_state["upload_id"]
                     st.rerun()
 
-                st.markdown("#### 📝 Verifique os Dados")
                 # Editor Interativo
                 edited_df = st.data_editor(df_p, num_rows="dynamic", use_container_width=True)
                 
-                if st.button(f"✅ Salvar em {tipo_imp}"):
+                if st.button(f"✅ Confirmar Importação de {len(edited_df)} itens"):
                     try:
                         edited_df['Data'] = edited_df['Data'].astype(str)
                         with sqlite3.connect(DB_NAME) as conn:
                             
                             if tipo_imp == "Receita":
-                                # Mapeia as 6 colunas para a tabela VENDAS
                                 df_b = pd.DataFrame()
                                 df_b["Data"] = edited_df["Data"]
-                                df_b["Cliente"] = edited_df["Entidade"] # Entidade -> Cliente
-                                df_b["Servico"] = edited_df["Categoria"] # Categoria -> Serviço
+                                df_b["Cliente"] = edited_df["Entidade"]
+                                df_b["Servico"] = edited_df["Categoria"]
                                 df_b["Conta_Recebimento"] = edited_df["Conta"]
                                 df_b["Obs"] = edited_df["Descrição"]
                                 df_b["Valor"] = edited_df["Valor"]
                                 # Padrões
-                                df_b["Consultor"] = "Importação"
+                                df_b["Consultor"] = "Importação em Lote"
                                 df_b["Status_Pagamento"] = "Pago Total"
                                 
                                 df_b.to_sql("vendas", conn, if_exists="append", index=False)
                             
-                            else:
-                                # Mapeia as 6 colunas para a tabela DESPESAS
+                            else: # Despesa
                                 df_b = pd.DataFrame()
                                 df_b["Data"] = edited_df["Data"]
                                 df_b["Categoria"] = edited_df["Categoria"]
@@ -791,9 +817,11 @@ elif escolha_menu == "⚙️ CONFIG":
                                 
                                 df_b.to_sql("despesas", conn, if_exists="append", index=False)
                         
-                        st.success("Sucesso!")
+                        st.success(f"Sucesso! {len(edited_df)} registros importados.")
                         del st.session_state["df_preview"]
+                        del st.session_state["upload_id"]
                         st.cache_data.clear()
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar: {e}")
 

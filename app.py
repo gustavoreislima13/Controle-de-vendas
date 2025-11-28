@@ -48,7 +48,6 @@ def check_login():
                     if user in USERS and USERS[user]["pass"] == password:
                         st.session_state.logged_in = True
                         st.session_state.user_info = USERS[user]
-                        # Define o tema do usuário IMEDIATAMENTE ao logar
                         st.session_state.theme = USERS[user]["theme"]
                         st.rerun()
                     else:
@@ -56,7 +55,6 @@ def check_login():
         return False
     return True
 
-# Se não estiver logado, para o código aqui
 if not check_login():
     st.stop()
 
@@ -90,6 +88,15 @@ def init_db():
             padroes = [("Limpeza Nome",), ("Score",), ("Consultoria",), ("Jurídico",)]
             c.executemany("INSERT INTO servicos (Nome) VALUES (?)", padroes)
         
+        # --- NOVA TABELA: CATEGORIAS DE DESPESAS ---
+        c.execute('CREATE TABLE IF NOT EXISTS categorias_despesas (id INTEGER PRIMARY KEY AUTOINCREMENT, Nome TEXT)')
+        c.execute("SELECT count(*) FROM categorias_despesas")
+        if c.fetchone()[0] == 0:
+            # Categorias Padrão Iniciais
+            cats_padrao = [("Fixo",), ("Comissões",), ("Marketing",), ("Impostos",), ("Pessoal",), ("Transporte",)]
+            c.executemany("INSERT INTO categorias_despesas (Nome) VALUES (?)", cats_padrao)
+        # -------------------------------------------
+
         c.execute('CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT)')
         
         c.execute('''CREATE TABLE IF NOT EXISTS vendas (
@@ -122,8 +129,6 @@ def init_db():
         except: pass
         try: c.execute("INSERT OR IGNORE INTO config (chave, valor) VALUES ('meta_anual', '600000')")
         except: pass
-        
-        # Removemos a config de tema do banco, pois agora é por usuário
         
         conn.commit()
 
@@ -214,7 +219,6 @@ def converter_para_excel(dfs_dict):
 # ==========================================
 # 4. SISTEMA DE TEMAS & CSS
 # ==========================================
-# O tema agora vem do login, mas garantimos um default
 if "theme" not in st.session_state:
     st.session_state.theme = "Escuro"
 
@@ -502,6 +506,7 @@ df_clientes_raw = load_data("clientes")
 df_consultores = load_data("consultores")
 df_bancos = load_data("bancos")
 df_servicos = load_data("servicos")
+df_cat_despesas = load_data("categorias_despesas") # Carrega as categorias customizadas
 df_mural = load_data("mural")
 
 meta_mensal = get_config('meta_mensal')
@@ -774,7 +779,13 @@ elif escolha_menu == "💰 FINANCEIRO":
             st.markdown("#### Lançar Saída")
             desc = st.text_input("Descrição")
             fornecedor = st.text_input("Fornecedor / Quem recebeu")
-            cat = st.selectbox("Categoria", ["Fixo", "Comissões", "Marketing", "Impostos", "Pessoal", "Transporte"])
+            
+            # --- ATUALIZAÇÃO: Puxa do Banco + Serviços ---
+            lista_cat_custom = df_cat_despesas["Nome"].tolist() if not df_cat_despesas.empty else []
+            # Combina: Customizadas + Serviços (Unifica e remove duplicatas)
+            lista_cat_final = sorted(list(set(lista_cat_custom + lista_servicos)))
+            
+            cat = st.selectbox("Categoria", lista_cat_final)
             con = st.selectbox("Saiu de", lista_bancos)
             val = st.number_input("Valor", min_value=0.0)
             if st.button("Salvar Despesa"):
@@ -848,7 +859,7 @@ elif escolha_menu == "⚙️ CONFIG":
                     try:
                         with sqlite3.connect(DB_NAME) as conn:
                             c = conn.cursor()
-                            tables_to_clear = ["vendas", "despesas", "clientes", "consultores", "bancos", "servicos", "config", "mural"]
+                            tables_to_clear = ["vendas", "despesas", "clientes", "consultores", "bancos", "servicos", "config", "mural", "categorias_despesas"]
                             for t in tables_to_clear:
                                 try: c.execute(f"DELETE FROM {t}")
                                 except: pass
@@ -866,6 +877,8 @@ elif escolha_menu == "⚙️ CONFIG":
         col_cadastros, col_sistema = st.columns(2)
         with col_cadastros:
             st.markdown("#### 📋 Cadastros Auxiliares")
+            
+            # --- SERVIÇOS (VENDA) ---
             with st.expander("Serviços (Venda)", expanded=True):
                 with st.form("add_s"):
                     ns = st.text_input("Novo Serviço")
@@ -875,6 +888,18 @@ elif escolha_menu == "⚙️ CONFIG":
                     if "Excluir" not in df_servicos.columns: df_servicos.insert(0, "Excluir", False)
                     ed_s = st.data_editor(df_servicos, hide_index=True, key="editor_servicos")
                     if st.button("Salvar Serviços"): update_full_table(ed_s, "servicos"); st.rerun()
+
+            # --- NOVO: CATEGORIAS (DESPESA) ---
+            with st.expander("Categorias (Despesa)", expanded=False):
+                with st.form("add_cd"):
+                    ncd = st.text_input("Nova Categoria")
+                    if st.form_submit_button("Add") and ncd: 
+                        run_query("INSERT INTO categorias_despesas (Nome) VALUES (?)", (ncd,)); st.rerun()
+                if not df_cat_despesas.empty: 
+                    if "Excluir" not in df_cat_despesas.columns: df_cat_despesas.insert(0, "Excluir", False)
+                    ed_cd = st.data_editor(df_cat_despesas, hide_index=True, key="editor_cat_despesas")
+                    if st.button("Salvar Categorias"): update_full_table(ed_cd, "categorias_despesas"); st.rerun()
+
             with st.expander("Consultores"):
                 with st.form("add_c"):
                     nm = st.text_input("Novo Consultor")

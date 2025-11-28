@@ -17,6 +17,15 @@ from openai import OpenAI
 # ==========================================
 st.set_page_config(page_title="CMG System Pro", layout="wide", page_icon="💎")
 
+import os
+
+# Adicione isso temporariamente logo após os imports para resetar o banco
+if os.path.exists('cmg_system.db'):
+    try:
+        os.remove('cmg_system.db')
+        print("Banco de dados corrompido removido com sucesso!")
+    except Exception as e:
+        print(f"Erro ao remover: {e}")
 # ==========================================
 # 1.1 SISTEMA DE LOGIN E USUÁRIOS
 # ==========================================

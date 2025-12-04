@@ -18,6 +18,22 @@ from openai import OpenAI
 st.set_page_config(page_title="CMG System Pro", layout="wide", page_icon="💎")
 
 
+import os
+
+# ... seus imports ...
+
+DB_NAME = 'cmg_system.db'
+
+# Verifica se o arquivo existe e se é válido (tenta conectar)
+if os.path.exists(DB_NAME):
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            c = conn.cursor()
+            c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    except sqlite3.DatabaseError:
+        # Se der erro, apaga o arquivo corrompido para criar um novo
+        print("Banco de dados corrompido detectado. Recriando...")
+        os.remove(DB_NAME)
 # ==========================================
 # 1.1 SISTEMA DE LOGIN E USUÁRIOS
 # ==========================================
